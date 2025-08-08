@@ -1,0 +1,26 @@
+[project]
+name = "bigquery-optimizer-backend"
+version = "0.1.0"
+description = "BigQuery Optimizer Backend with Google ADK"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=1.4.2",
+    "google-cloud-bigquery>=3.13.0",
+    "google-genai>=0.3.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlparse>=0.4.4",
+    "python-jose[cryptography]>=3.3.0",
+    "aiofiles>=23.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
