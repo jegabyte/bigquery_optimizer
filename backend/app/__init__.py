@@ -3,7 +3,7 @@ BigQuery Optimizer ADK Backend
 Root agent configuration for ADK API Server
 """
 
-# Use the rule-based agent with clear intermediate outputs
-from app.rule_based_agent import root_agent
+# Use the streaming agent for better UI integration with stage-by-stage outputs
+from app.streaming_agent import root_agent
 
 __all__ = ["root_agent"]

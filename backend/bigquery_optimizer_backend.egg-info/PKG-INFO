@@ -1,0 +1,164 @@
+Metadata-Version: 2.4
+Name: bigquery-optimizer-backend
+Version: 0.1.0
+Summary: BigQuery Optimizer Backend with Google ADK
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: google-adk>=1.4.2
+Requires-Dist: google-cloud-bigquery>=3.13.0
+Requires-Dist: google-genai>=0.3.0
+Requires-Dist: pydantic>=2.5.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: fastapi>=0.104.0
+Requires-Dist: uvicorn[standard]>=0.24.0
+Requires-Dist: sqlparse>=0.4.4
+Requires-Dist: python-jose[cryptography]>=3.3.0
+Requires-Dist: aiofiles>=23.0.0
+Requires-Dist: aiohttp>=3.9.0
+
+# BigQuery Optimizer Backend
+
+ADK-based backend for BigQuery query optimization using Google's Agent Development Kit.
+
+## Architecture
+
+The backend uses a multi-agent system built with Google ADK:
+
+1. **Orchestrator Agent**: Main coordinator that manages the optimization pipeline
+2. **Metadata Extractor Agent**: Extracts table metadata and query characteristics
+3. **Rule Validator Agent**: Validates queries against optimization rules
+4. **Query Rewriter Agent**: Rewrites queries to fix issues and optimize performance
+5. **Result Verifier Agent**: Validates optimizations and calculates cost savings
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Google Cloud account (for BigQuery integration)
+- Gemini API key (for AI Studio) or Vertex AI setup
+
+### Installation
+
+1. Install uv package manager:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. Install dependencies:
+```bash
+make install
+# or
+uv sync
+```
+
+3. Configure environment:
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+### Configuration
+
+Set the following environment variables in `.env`:
+
+- `GOOGLE_CLOUD_PROJECT`: Your GCP project ID
+- `GOOGLE_GENAI_API_KEY`: Your Gemini API key (for AI Studio)
+- `GOOGLE_GENAI_USE_VERTEXAI`: Set to `True` to use Vertex AI instead of AI Studio
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to service account JSON (for BigQuery)
+
+## Running the Backend
+
+### ADK API Server
+
+Start the API server that the frontend will connect to:
+
+```bash
+make run
+# or
+uv run adk api_server app --port 8000
+```
+
+For development with auto-reload:
+```bash
+make dev
+```
+
+### ADK Playground
+
+Test agents interactively:
+```bash
+make playground
+# or
+uv run adk web --port 8501
+```
+
+## API Endpoints
+
+The ADK API server provides the following endpoints:
+
+- `POST /runs/stream`: Stream query optimization results
+- `GET /agents`: List available agents
+- `GET /health`: Health check endpoint
+
+## Project Structure
+
+```
+backend/
+├── app/
+│   ├── __init__.py          # Root agent export
+│   ├── agents/
+│   │   ├── orchestrator.py  # Main coordinator
+│   │   ├── metadata.py      # Metadata extraction
+│   │   ├── validator.py     # Rule validation
+│   │   ├── rewriter.py      # Query optimization
+│   │   └── verifier.py      # Result validation
+│   ├── tools/
+│   │   ├── bigquery_tools.py  # BigQuery utilities (Phase 4)
+│   │   └── gemini_tools.py    # LLM integration
+│   └── config/
+│       └── rules.yaml       # Optimization rules
+├── pyproject.toml           # Project dependencies
+├── Makefile                 # Development commands
+└── README.md               # This file
+```
+
+## Development
+
+### Adding New Agents
+
+1. Create a new agent file in `app/agents/`
+2. Define the agent using `genai.Agent`
+3. Import and register in orchestrator if needed
+
+### Testing
+
+Run tests:
+```bash
+make test
+```
+
+### Debugging
+
+Enable debug logging:
+```bash
+export ADK_LOG_LEVEL=DEBUG
+make dev
+```
+
+## Current Status
+
+✅ Phase 1: Frontend data management (completed)
+✅ Phase 2: ADK backend setup (completed)
+⏳ Phase 3: Agent implementation (in progress)
+⏳ Phase 4: BigQuery integration (pending)
+⏳ Phase 5: Frontend-ADK integration (pending)
+
+## Next Steps
+
+1. Get Gemini API key from Google AI Studio
+2. Configure .env file with credentials
+3. Test agents using ADK playground
+4. Integrate with frontend via streaming API
+5. Add real BigQuery connection (Phase 4)

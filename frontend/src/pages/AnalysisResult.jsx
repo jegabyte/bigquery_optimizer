@@ -3,7 +3,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
 import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
-import CompactProgressStepper from '../components/CompactProgressStepper';
 import toast from 'react-hot-toast';
 import { analyses } from '../services/database';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
@@ -34,6 +33,14 @@ WHERE region = 'US'`);
   const [originalOptions, setOriginalOptions] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState(null);
+  const [stageData, setStageData] = useState({
+    metadata: null,
+    rules: null,
+    optimization: null,
+    report: null,
+    validation: null
+  });
+  const [selectedStage, setSelectedStage] = useState(null);
 
   // Load existing analysis from IndexedDB
   useEffect(() => {
@@ -59,6 +66,12 @@ WHERE region = 'US'`);
           validationResult: existingAnalysis.validationResult,
           metadata: existingAnalysis.metadata
         });
+        
+        // Load stage data if available
+        if (existingAnalysis.metadata?.stages) {
+          setStageData(existingAnalysis.metadata.stages);
+        }
+        
         setOriginalQuery(existingAnalysis.query || existingAnalysis.originalQuery);
         setOriginalOptions(existingAnalysis.options);
         setMode('view');
@@ -137,11 +150,16 @@ WHERE region = 'US'`);
     setResult(null);
     setHasChanges(false);
     setAnalysisStatus('processing');
+    setStageData({
+      metadata: null,
+      rules: null,
+      optimization: null,
+      report: null,
+      validation: null
+    });
+    setSelectedStage(null);
     
     try {
-      // Start progress simulation in parallel
-      const progressPromise = simulateProgress();
-      
       // Try to use ADK backend first, fallback to mock if not available
       let optimizationResult;
       const isADKAvailable = await testADKConnection();
@@ -154,6 +172,42 @@ WHERE region = 'US'`);
             validate: options.validate,
             onProgress: (event) => {
               console.log('ADK Progress:', event);
+              
+              // Update progress stepper based on stage
+              if (event.stage === 'metadata') {
+                setCurrentStep(0);
+              } else if (event.stage === 'analysis') {
+                setCurrentStep(1);
+              } else if (event.stage === 'optimization') {
+                setCurrentStep(2);
+              } else if (event.stage === 'finalizing') {
+                setCurrentStep(3);
+              } else if (event.stage === 'validation' && options.validate) {
+                setCurrentStep(4);
+              }
+              
+              // Show stage message
+              if (event.message) {
+                console.log('Stage update:', event.message);
+              }
+            },
+            onStageComplete: (stage, data) => {
+              // Store stage data for display
+              setStageData(prev => ({
+                ...prev,
+                [stage]: data
+              }));
+              
+              // Auto-progress to next stage
+              if (stage === 'metadata') {
+                setCurrentStep(1); // Start rules analysis
+              } else if (stage === 'rules') {
+                setCurrentStep(2); // Start optimization
+              } else if (stage === 'optimization') {
+                setCurrentStep(3); // Start final report
+              } else if (stage === 'report' && options.validate) {
+                setCurrentStep(4); // Start validation
+              }
             }
           });
           
@@ -260,10 +314,7 @@ WHERE region = 'US'`);
         return;
       }
       
-      // Wait for progress animation to complete
-      await progressPromise;
-      
-      // Save to IndexedDB
+      // Save to IndexedDB with merged stage data
       await analyses.create({
         analysisId,
         query,
@@ -271,11 +322,29 @@ WHERE region = 'US'`);
         optimizedQuery: optimizationResult.optimizedQuery,
         issues: optimizationResult.issues,
         validationResult: optimizationResult.validationResult,
-        metadata: optimizationResult.metadata,
+        metadata: {
+          ...optimizationResult.metadata,
+          stages: {
+            ...stageData,
+            ...(optimizationResult.metadata?.stages || {})
+          }
+        },
         options
       });
       
-      setResult(optimizationResult);
+      // Create final result with all accumulated stage data
+      const finalResult = {
+        ...optimizationResult,
+        metadata: {
+          ...optimizationResult.metadata,
+          stages: {
+            ...stageData,
+            ...(optimizationResult.metadata?.stages || {})
+          }
+        }
+      };
+      
+      setResult(finalResult);
       setMode('view');
       setOriginalQuery(query);
       setOriginalOptions(options);
@@ -529,22 +598,259 @@ WHERE region = 'US'`);
         </div>
       </div>
 
-      {/* Progress Stepper */}
-      <AnimatePresence>
-        {showProgress && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <CompactProgressStepper 
-              currentStep={currentStep} 
-              includeValidation={options.validate}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Optimization Stages Display */}
+      {showProgress && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card mb-4"
+        >
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimization Stages</h3>
+          <div className="space-y-2">
+            {/* Stage 1: Metadata Extraction */}
+            <div>
+              <button
+                onClick={() => stageData.metadata && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
+                disabled={!stageData.metadata}
+                className={`w-full text-left p-3 rounded-lg transition-colors ${
+                  stageData.metadata 
+                    ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
+                    : currentStep === 0 
+                      ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
+                      : 'bg-gray-50 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    {stageData.metadata ? (
+                      <FiCheckCircle className="h-5 w-5 text-green-600" />
+                    ) : currentStep === 0 ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                    )}
+                    <span className={`font-medium ${!stageData.metadata && currentStep !== 0 ? 'text-gray-400' : ''}`}>
+                      Metadata Extraction
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-600">
+                    {stageData.metadata 
+                      ? `${stageData.metadata.tables_found} table(s), ${stageData.metadata.total_size_gb}GB`
+                      : currentStep === 0 
+                        ? 'Processing...'
+                        : 'Waiting...'}
+                  </span>
+                </div>
+              </button>
+              {selectedStage === 'metadata' && stageData.metadata && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
+                >
+                  <pre className="text-xs text-gray-700 overflow-auto">
+                    {JSON.stringify(stageData.metadata, null, 2)}
+                  </pre>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Stage 2: Rule Analysis */}
+            <div>
+              <button
+                onClick={() => stageData.rules && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
+                disabled={!stageData.rules}
+                className={`w-full text-left p-3 rounded-lg transition-colors ${
+                  stageData.rules 
+                    ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
+                    : currentStep === 1 
+                      ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
+                      : 'bg-gray-50 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    {stageData.rules ? (
+                      <FiCheckCircle className="h-5 w-5 text-green-600" />
+                    ) : currentStep === 1 ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                    )}
+                    <span className={`font-medium ${!stageData.rules && currentStep !== 1 ? 'text-gray-400' : ''}`}>
+                      Anti-Pattern Analysis
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-600">
+                    {stageData.rules 
+                      ? `${stageData.rules.violations_found} violations, ${stageData.rules.compliance_score}% compliant`
+                      : currentStep === 1 
+                        ? 'Processing...'
+                        : 'Waiting...'}
+                  </span>
+                </div>
+              </button>
+              {selectedStage === 'rules' && stageData.rules && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
+                >
+                  <pre className="text-xs text-gray-700 overflow-auto">
+                    {JSON.stringify(stageData.rules, null, 2)}
+                  </pre>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Stage 3: Query Optimization */}
+            <div>
+              <button
+                onClick={() => stageData.optimization && setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
+                disabled={!stageData.optimization}
+                className={`w-full text-left p-3 rounded-lg transition-colors ${
+                  stageData.optimization 
+                    ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
+                    : currentStep === 2 
+                      ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
+                      : 'bg-gray-50 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    {stageData.optimization ? (
+                      <FiCheckCircle className="h-5 w-5 text-green-600" />
+                    ) : currentStep === 2 ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                    )}
+                    <span className={`font-medium ${!stageData.optimization && currentStep !== 2 ? 'text-gray-400' : ''}`}>
+                      Query Optimization
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-600">
+                    {stageData.optimization 
+                      ? `${stageData.optimization.total_optimizations} steps, ${stageData.optimization.total_improvement}`
+                      : currentStep === 2 
+                        ? 'Processing...'
+                        : 'Waiting...'}
+                  </span>
+                </div>
+              </button>
+              {selectedStage === 'optimization' && stageData.optimization && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
+                >
+                  <pre className="text-xs text-gray-700 overflow-auto">
+                    {JSON.stringify(stageData.optimization, null, 2)}
+                  </pre>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Stage 4: Final Report */}
+            <div>
+              <button
+                onClick={() => stageData.report && setSelectedStage(selectedStage === 'report' ? null : 'report')}
+                disabled={!stageData.report}
+                className={`w-full text-left p-3 rounded-lg transition-colors ${
+                  stageData.report 
+                    ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
+                    : currentStep === 3 
+                      ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
+                      : 'bg-gray-50 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    {stageData.report ? (
+                      <FiCheckCircle className="h-5 w-5 text-green-600" />
+                    ) : currentStep === 3 ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                    )}
+                    <span className={`font-medium ${!stageData.report && currentStep !== 3 ? 'text-gray-400' : ''}`}>
+                      Final Report
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-600">
+                    {stageData.report 
+                      ? `${stageData.report.executive_summary?.cost_reduction} cost reduction`
+                      : currentStep === 3 
+                        ? 'Processing...'
+                        : 'Waiting...'}
+                  </span>
+                </div>
+              </button>
+              {selectedStage === 'report' && stageData.report && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
+                >
+                  <pre className="text-xs text-gray-700 overflow-auto">
+                    {JSON.stringify(stageData.report, null, 2)}
+                  </pre>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Stage 5: Query Validation (if enabled) */}
+            {options.validate && (
+              <div>
+                <button
+                  onClick={() => stageData.validation && setSelectedStage(selectedStage === 'validation' ? null : 'validation')}
+                  disabled={!stageData.validation}
+                  className={`w-full text-left p-3 rounded-lg transition-colors ${
+                    stageData.validation 
+                      ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
+                      : currentStep === 4 
+                        ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
+                        : 'bg-gray-50 cursor-not-allowed'
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      {stageData.validation ? (
+                        <FiCheckCircle className="h-5 w-5 text-green-600" />
+                      ) : currentStep === 4 ? (
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                      ) : (
+                        <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                      )}
+                      <span className={`font-medium ${!stageData.validation && currentStep !== 4 ? 'text-gray-400' : ''}`}>
+                        Query Validation
+                      </span>
+                    </div>
+                    <span className="text-sm text-gray-600">
+                      {stageData.validation 
+                        ? 'Validation complete'
+                        : currentStep === 4 
+                          ? 'Validating...'
+                          : 'Waiting...'}
+                    </span>
+                  </div>
+                </button>
+                {selectedStage === 'validation' && stageData.validation && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
+                  >
+                    <pre className="text-xs text-gray-700 overflow-auto">
+                      {JSON.stringify(stageData.validation, null, 2)}
+                    </pre>
+                  </motion.div>
+                )}
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
 
       {/* Edit Mode */}
       {mode === 'edit' && (
@@ -626,6 +932,131 @@ WHERE region = 'US'`);
       {/* View Mode - Results or Error */}
       {mode === 'view' && result && (
         <>
+          {/* Original Query Display */}
+          {!result.error && (
+            <div className="card mb-4">
+              <div className="flex justify-between items-start mb-3">
+                <h3 className="text-lg font-semibold text-gray-900">Original Query</h3>
+                <button
+                  onClick={() => copyToClipboard(result.originalQuery || query)}
+                  className="btn-secondary btn-sm"
+                >
+                  <FiCopy className="h-4 w-4 mr-1" />
+                  Copy
+                </button>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <pre className="text-sm text-gray-800 whitespace-pre-wrap font-mono">
+                  {result.originalQuery || query}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* Stage Data Display */}
+          {!result.error && Object.keys(stageData).some(key => stageData[key]) && (
+            <div className="card mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimization Stages</h3>
+              <div className="space-y-2">
+                {stageData.metadata && (
+                  <button
+                    onClick={() => setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
+                    className="w-full text-left p-3 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <FiDatabase className="h-5 w-5 text-blue-600" />
+                        <span className="font-medium">Metadata Extraction</span>
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {stageData.metadata.tables_found} table(s), {stageData.metadata.total_size_gb}GB
+                      </span>
+                    </div>
+                  </button>
+                )}
+                {selectedStage === 'metadata' && stageData.metadata && (
+                  <div className="ml-7 p-3 bg-white rounded-lg border border-blue-200">
+                    <pre className="text-xs text-gray-700 overflow-auto">
+                      {JSON.stringify(stageData.metadata, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {stageData.rules && (
+                  <button
+                    onClick={() => setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
+                    className="w-full text-left p-3 rounded-lg bg-yellow-50 hover:bg-yellow-100 transition-colors"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <FiAlertTriangle className="h-5 w-5 text-yellow-600" />
+                        <span className="font-medium">Rule Analysis</span>
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {stageData.rules.violations_found} violations, {stageData.rules.compliance_score}% compliant
+                      </span>
+                    </div>
+                  </button>
+                )}
+                {selectedStage === 'rules' && stageData.rules && (
+                  <div className="ml-7 p-3 bg-white rounded-lg border border-yellow-200">
+                    <pre className="text-xs text-gray-700 overflow-auto">
+                      {JSON.stringify(stageData.rules, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {stageData.optimization && (
+                  <button
+                    onClick={() => setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
+                    className="w-full text-left p-3 rounded-lg bg-green-50 hover:bg-green-100 transition-colors"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <FiCheckCircle className="h-5 w-5 text-green-600" />
+                        <span className="font-medium">Query Optimization</span>
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {stageData.optimization.total_optimizations} steps, {stageData.optimization.total_improvement}
+                      </span>
+                    </div>
+                  </button>
+                )}
+                {selectedStage === 'optimization' && stageData.optimization && (
+                  <div className="ml-7 p-3 bg-white rounded-lg border border-green-200">
+                    <pre className="text-xs text-gray-700 overflow-auto">
+                      {JSON.stringify(stageData.optimization, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {stageData.report && (
+                  <button
+                    onClick={() => setSelectedStage(selectedStage === 'report' ? null : 'report')}
+                    className="w-full text-left p-3 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <FiInfo className="h-5 w-5 text-purple-600" />
+                        <span className="font-medium">Final Report</span>
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {stageData.report.executive_summary?.cost_reduction} cost reduction
+                      </span>
+                    </div>
+                  </button>
+                )}
+                {selectedStage === 'report' && stageData.report && (
+                  <div className="ml-7 p-3 bg-white rounded-lg border border-purple-200">
+                    <pre className="text-xs text-gray-700 overflow-auto">
+                      {JSON.stringify(stageData.report, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Error Display */}
           {result.error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -688,33 +1119,11 @@ WHERE region = 'US'`);
           {/* Only show results UI when there's no error */}
           {!result.error && (
             <>
-              {/* Success - Backend Status Indicator */}
-              {backendStatus && (
-                <div className={`rounded-lg p-3 mb-4 ${
-                  backendStatus.service === 'vertex_ai' 
-                    ? 'bg-green-50 border border-green-200' 
-                    : 'bg-blue-50 border border-blue-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${
-                        backendStatus.service === 'vertex_ai' ? 'bg-green-500' : 'bg-blue-500'
-                      } animate-pulse`} />
-                      <p className="text-sm font-medium">
-                        {backendStatus.message}
-                      </p>
-                    </div>
-                    {backendStatus.debug && (
-                      <button 
-                        onClick={() => console.log('Debug info:', backendStatus.debug)}
-                        className="text-xs text-gray-500 hover:text-gray-700"
-                      >
-                        View debug info
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* Optimization Output Heading */}
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Optimization Output</h2>
+                <p className="text-sm text-gray-600 mt-1">Analysis completed with {result?.issues?.length || 0} issues found</p>
+              </div>
               
               {hasChanges && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
