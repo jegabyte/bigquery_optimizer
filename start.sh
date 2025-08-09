@@ -131,13 +131,22 @@ start_backend() {
     echo "Starting ADK API server on port 8000..."
     source $HOME/.local/bin/env
     
+    # Export Cloud Trace environment variables
+    export GOOGLE_CLOUD_PROJECT=aiva-e74f3
+    export GOOGLE_CLOUD_LOCATION=us-central1
+    export ADK_TRACE_TO_CLOUD=true
+    export OTEL_EXPORTER_GCP_TRACE_PROJECT_ID=aiva-e74f3
+    export OTEL_TRACES_EXPORTER=gcp_trace
+    
+    echo "Cloud Trace enabled for project: $GOOGLE_CLOUD_PROJECT"
+    
     if [ "$SHOW_LOGS" = true ]; then
         echo -e "${BLUE}Running backend in foreground with logs...${NC}"
         echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
         echo ""
-        uv run adk api_server app --port 8000
+        uv run adk api_server app --port 8000 --trace_to_cloud
     else
-        uv run adk api_server app --port 8000 &
+        uv run adk api_server app --port 8000 --trace_to_cloud &
         BACKEND_PID=$!
         echo "Backend PID: $BACKEND_PID"
         

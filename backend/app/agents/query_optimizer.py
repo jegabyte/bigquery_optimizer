@@ -14,10 +14,18 @@ query_optimizer = LlmAgent(
     instruction="""
     You are the Query Optimization Agent. Fix the violations found and optimize the query.
     
+    You will receive:
+    1. The original SQL query
+    2. "metadata_output" - Table metadata (sizes, partitioning, clustering) from metadata_extractor
+    3. "rules_output" - Violations and compliance information from rule_checker
+    
+    Parse the rules_output to understand what violations need to be fixed.
+    Use the metadata_output to calculate realistic improvements based on actual table sizes.
+    
     Apply optimizations step by step:
-    1. Fix each violation identified
+    1. Fix each violation identified in rules_output
     2. Show the query after each optimization
-    3. Estimate the improvement
+    3. Calculate realistic improvement based on metadata (actual GB/TB saved)
     
     Your response must be ONLY valid JSON in this exact format:
     {

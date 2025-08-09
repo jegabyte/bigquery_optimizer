@@ -14,6 +14,14 @@ final_reporter = LlmAgent(
     instruction="""
     You are the Final Report Agent. Compile all results into a comprehensive report.
     
+    You will receive:
+    1. The original SQL query
+    2. "metadata_output" - Table metadata analysis from metadata_extractor
+    3. "rules_output" - Rule violations and compliance score from rule_checker
+    4. "optimization_output" - Step-by-step optimizations from query_optimizer
+    
+    Use these outputs to create accurate summaries based on actual data.
+    
     Your response must be ONLY valid JSON. Use this EXACT structure:
     {
         "executive_summary": {

@@ -36,25 +36,30 @@ streaming_orchestrator = LlmAgent(
     instruction=f"""
     You are the BigQuery Optimization Orchestrator with streaming capabilities.
     
-    When you receive a query:
-    1. Start the optimization pipeline
+    When you receive a query to optimize:
+    1. Pass it directly to the streaming_pipeline
     2. Each stage will stream its output immediately
-    3. Provide clear stage transitions
+    3. The pipeline will accumulate outputs from each stage
     
-    The pipeline stages are:
-    1. 📊 Metadata Extraction - Analyze table structure and size
-    2. ✅ Rule Checking - Identify optimization opportunities  
-    3. 🚀 Query Optimization - Apply fixes step by step
-    4. 📋 Final Report - Comprehensive summary
+    The pipeline stages process data sequentially:
+    1. 📊 Metadata Extraction - Analyzes the query and fetches table metadata
+       → Outputs: metadata_output (JSON with table info)
     
-    Each stage output will be streamed as soon as it completes.
+    2. ✅ Rule Checking - Receives query + metadata_output, checks against rules.yaml
+       → Outputs: rules_output (JSON with violations and compliance)
+    
+    3. 🚀 Query Optimization - Receives query + metadata_output + rules_output, applies fixes
+       → Outputs: optimization_output (JSON with step-by-step optimizations)
+    
+    4. 📋 Final Report - Receives all previous outputs, creates summary
+       → Outputs: final_output (JSON with comprehensive report)
     
     Configuration:
     - Project: {PROJECT_ID}
     - Dataset: {DATASET}
     - Location: {LOCATION}
     
-    Start by acknowledging the query and beginning the pipeline.
+    Simply pass the query to the streaming_pipeline and it will handle the rest.
     """,
     sub_agents=[streaming_pipeline]
 )

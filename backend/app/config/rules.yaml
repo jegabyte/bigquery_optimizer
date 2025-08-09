@@ -1,284 +1,267 @@
 version: 2
 rules:
   - id: NO_SELECT_STAR
-    name: Avoid SELECT *
+    title: "Avoid SELECT *"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      Flag if any SELECT list contains '*' (including 't.*'), except COUNT(*),
-      SELECT * EXCEPT(...), or SELECT * REPLACE(...).
-    remediation_instructions: >
-      Replace '*' with the specific columns needed to reduce bytes scanned.
-    bad_examples:
-      - "SELECT * FROM `project.dataset.table`"
-      - "SELECT t.* FROM `project.dataset.table` AS t"
-    good_examples:
-      - "SELECT id, name, created_at FROM `project.dataset.table`"
+    detect: "Flag wildcard projection (* or t.*) except COUNT(*), * EXCEPT(...), or * REPLACE(...)."
+    fix: "Select only required columns."
+    examples:
+      bad:
+        - "SELECT * FROM `project.dataset.table`"
+        - "SELECT t.* FROM `project.dataset.table` AS t"
+      good:
+        - "SELECT id, dt FROM `project.dataset.table`"
 
   - id: MISSING_PARTITION_FILTER
-    name: Missing partition filter
+    title: "Missing partition filter"
     severity: error
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      For each referenced partitioned table, check whether the WHERE clause
-      filters on the partitioning column (or on _PARTITIONTIME/_PARTITIONDATE for
-      ingestion-time partitioned tables). If none, flag.
-    remediation_instructions: >
-      Add a WHERE filter on the partitioning column (or _PARTITIONTIME/_PARTITIONDATE)
-      to enable partition pruning.
-    bad_examples:
-      - "SELECT id FROM `p.d.t`"
-    good_examples:
-      - "SELECT id FROM `p.d.t` WHERE dt BETWEEN '2025-07-01' AND '2025-07-31'"
+    detect: "Partitioned table read without a WHERE on its partition column (or _PARTITIONTIME/_PARTITIONDATE)."
+    fix: "Add a constant/param range filter on the partition column."
+    examples:
+      bad:
+        - "SELECT * FROM `project.dataset.events`"
+      good:
+        - "SELECT * FROM `project.dataset.events` WHERE event_date BETWEEN @start AND @end"
 
   - id: NON_CONSTANT_PARTITION_FILTER
-    name: Non-constant partition filter
+    title: "Non-constant partition filter"
     severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If the partition filter is non-constant (derived from another field,
-      subquery, or expression BigQuery can’t treat as constant), flag because
-      it prevents partition pruning.
-    remediation_instructions: >
-      Use a constant or parameterized literal range on the partition column.
-    bad_examples:
-      - "WHERE DATE(dt) = DATE(other_col)"
-      - "WHERE _TABLE_SUFFIX IN (SELECT suffix FROM params)"
-    good_examples:
-      - "WHERE dt BETWEEN @start_date AND @end_date"
+    detect: "Partition column filtered by non-constant expression (another column, subquery, or volatile func) preventing pruning."
+    fix: "Compare partition column to constants or parameters."
+    examples:
+      bad:
+        - "WHERE dt = (SELECT MAX(order_dt) FROM `project.dataset.orders`)"
+      good:
+        - "WHERE dt BETWEEN '2025-08-01' AND '2025-08-31'"
 
   - id: FUNCTION_ON_PARTITION_COLUMN
-    name: Function on partition column prevents pruning
+    title: "Function on partition column"
     severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If the WHERE clause wraps the partition column in a function (CAST, DATE(),
-      EXTRACT, arithmetic), flag as it disables pruning.
-    remediation_instructions: >
-      Compare directly on the partition column using range predicates without
-      wrapping it in a function.
-    bad_examples:
-      - "WHERE DATE(dt_ts) = '2025-07-01'"
-      - "WHERE customer_id + 1 BETWEEN 30 AND 50"
-    good_examples:
-      - "WHERE dt_ts >= TIMESTAMP('2025-07-01') AND dt_ts < TIMESTAMP('2025-07-02')"
-      - "WHERE customer_id BETWEEN 30 AND 50"
+    detect: "Partition column wrapped in a function/expression in WHERE disables partition pruning."
+    fix: "Compare partition column directly to constants/params without wrapping."
+    examples:
+      bad:
+        - "WHERE DATE(event_ts) = '2025-08-01'"
+      good:
+        - "WHERE event_ts >= TIMESTAMP('2025-08-01') AND event_ts < TIMESTAMP('2025-08-02')"
 
   - id: CLUSTER_FILTER_COMPLEX
-    name: Cluster pruning disabled by complex filter
+    title: "Complex filter on clustered column"
     severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If a clustered column is used in a complex filter expression (wrapped in a
-      function or compared to another column), flag because block pruning won’t apply.
-    remediation_instructions: >
-      Filter directly on the clustered column (simple comparisons/ranges).
-    bad_examples:
-      - "WHERE CAST(customer_id AS STRING) = '10000'"
-      - "WHERE customer_id = other_table.order_id"
-    good_examples:
-      - "WHERE customer_id = 10000"
+    detect: "Clustered column filtered via function or compared to another column, blocking block-pruning."
+    fix: "Use simple equality/range predicates on clustered columns."
+    examples:
+      bad:
+        - "WHERE SUBSTR(username,1,3) = 'adm'"
+      good:
+        - "WHERE username = 'admin'"
 
   - id: WILDCARD_TABLE_NO_SUFFIX_FILTER
-    name: Wildcard table without _TABLE_SUFFIX filter
+    title: "Wildcard without _TABLE_SUFFIX filter"
     severity: error
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If FROM references a wildcard table (e.g., table* or `events_*`) and the
-      query does not filter _TABLE_SUFFIX (or scans an obviously huge range), flag.
-    remediation_instructions: >
-      Add a WHERE filter on _TABLE_SUFFIX to restrict scanned tables (and use
-      the most granular prefix possible).
-    bad_examples:
-      - "FROM `p.d.events_*`"
-    good_examples:
-      - "FROM `p.d.events_*` WHERE _TABLE_SUFFIX BETWEEN '20250701' AND '20250707'"
+    detect: "Wildcard table (e.g., events_*) used without a WHERE _TABLE_SUFFIX restriction."
+    fix: "Filter _TABLE_SUFFIX by equality or bounded range."
+    examples:
+      bad:
+        - "FROM `project.dataset.events_*`"
+      good:
+        - "FROM `project.dataset.events_*` WHERE _TABLE_SUFFIX BETWEEN @s AND @e"
 
   - id: EXCESSIVE_WILDCARD_SCOPE
-    name: Excessive wildcard scope
+    title: "Wildcard range too broad"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If a wildcard table is used with an overly broad suffix range (months/years)
-      where a narrower range is plausible from context, flag.
-    remediation_instructions: >
-      Narrow the _TABLE_SUFFIX range or replace shards with time-partitioned tables.
+    detect: "Wildcard _TABLE_SUFFIX range spans an overly large period (e.g., months/years) when a narrower window is reasonable."
+    fix: "Narrow the _TABLE_SUFFIX range or migrate to a partitioned table."
+    examples:
+      bad:
+        - "WHERE _TABLE_SUFFIX BETWEEN '20190101' AND '20251231'"
+      good:
+        - "WHERE _TABLE_SUFFIX BETWEEN '20250701' AND '20250731'"
 
   - id: CROSS_JOIN_WARNING
-    name: Cross join detected
+    title: "Cross join without predicate"
     severity: error
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      Detect explicit CROSS JOIN, or implicit cross join (comma-separated tables)
-      or UNNEST cross join lacking a restrictive predicate; flag due to potential
-      row explosion.
-    remediation_instructions: >
-      Use an explicit JOIN with ON/USING keys, pre-aggregate, or filter prior to join.
-    bad_examples:
-      - "SELECT * FROM a, b"
-      - "SELECT * FROM a CROSS JOIN b"
-    good_examples:
-      - "SELECT * FROM a JOIN b ON a.id = b.id"
+    detect: "Explicit CROSS JOIN or comma join/UNNEST without restrictive predicate causing Cartesian product."
+    fix: "Use JOIN with ON/USING and apply filters early."
+    examples:
+      bad:
+        - "SELECT * FROM a, b"
+        - "SELECT * FROM a CROSS JOIN b"
+      good:
+        - "SELECT * FROM a JOIN b ON a.id = b.id"
 
   - id: SELF_JOIN_ANTIPATTERN
-    name: Self-join likely anti-pattern
+    title: "Self-join pattern likely replaceable"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If a table is joined to itself to compute row-dependent relationships,
-      flag and suggest window functions or PIVOT instead.
-    remediation_instructions: >
-      Use analytic/window functions or PIVOT to avoid squaring output rows.
-    bad_examples:
-      - "SELECT * FROM t a JOIN t b ON a.grp = b.grp"
-    good_examples:
-      - "SELECT a.*, ROW_NUMBER() OVER(PARTITION BY grp ORDER BY ts) rn FROM t a"
+    detect: "Self-join used to compare rows where analytic functions/pivots could avoid duplication."
+    fix: "Use window functions or pivots to avoid self-join if possible."
+    examples:
+      bad:
+        - "FROM t AS a JOIN t AS b ON a.user_id = b.user_id"
+      good:
+        - "SELECT user_id, LAG(val) OVER(PARTITION BY user_id ORDER BY ts) AS prev_val FROM t"
 
   - id: PREAGG_BEFORE_JOIN
-    name: No pre-aggregation before large join
+    title: "Join large tables without pre-aggregation"
     severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If two large tables are joined without filtering or pre-aggregating the
-      high-cardinality side, flag.
-    remediation_instructions: >
-      Aggregate or filter early to reduce data volume before joining.
-    bad_examples:
-      - "SELECT u.*, c.* FROM users u JOIN comments c ON u.id=c.user_id"
-    good_examples:
-      - |
-        WITH comments AS (
-          SELECT user_id, COUNT(*) AS comments_count
-          FROM comments WHERE user_id IS NOT NULL GROUP BY user_id
-        )
-        SELECT u.*, c.comments_count
-        FROM comments c JOIN users u ON c.user_id=u.id
+    detect: "High-cardinality tables joined directly with no filtering/aggregation on at least one side."
+    fix: "Pre-aggregate or filter each large input before joining."
+    examples:
+      bad:
+        - "FROM clicks c JOIN purchases p ON c.user_id = p.user_id"
+      good:
+        - "WITH c AS (SELECT user_id, COUNT(*) cnt FROM clicks WHERE dt>=@s GROUP BY user_id) SELECT * FROM c JOIN p ON ..."
 
   - id: INEFFICIENT_JOIN_ORDER
-    name: Inefficient join pattern/order
-    severity: info
+    title: "Potentially inefficient join order"
+    severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If the largest table is not first in the FROM/JOIN order and the query
-      lacks other optimizations, or if join keys are mismatched types, flag as a
-      potential inefficiency (note: the optimizer may reorder, treat as guidance).
-    remediation_instructions: >
-      Start with the largest table; ensure join keys are compatible types; combine
-      with pre-aggregation and early filters.
+    detect: "Very large table appears early or join requires type casts; advise ordering small→large and aligning key types."
+    fix: "Filter/aggregate small inputs first and join largest last on type-aligned keys."
+    examples:
+      bad:
+        - "FROM big AS b JOIN small AS s ON CAST(b.id AS STRING)=s.id"
+      good:
+        - "FROM (SELECT ... FROM small WHERE ...) s JOIN big b ON b.id = s.id"
 
   - id: JOIN_ON_STRING_KEY
-    name: Join on wide STRING keys
-    severity: info
+    title: "Join on wide STRING keys"
+    severity: warning
     enabled: true
-    requires_metadata: true
-    detection_instructions: >
-      If wide STRING columns are used as join keys and INT64 alternatives exist
-      (or castable keys), flag as potential cost/perf issue.
-    remediation_instructions: >
-      Prefer INT64 (or narrower) join keys when feasible to reduce comparison cost.
+    detect: "Joins use large STRING columns when a narrower numeric key exists."
+    fix: "Prefer numeric/surrogate keys for joins where feasible."
+    examples:
+      bad:
+        - "ON t1.customer_name = t2.customer_name"
+      good:
+        - "ON t1.customer_id = t2.customer_id"
 
   - id: ORDER_BY_WITHOUT_LIMIT
-    name: ORDER BY without LIMIT
+    title: "ORDER BY without LIMIT"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If the outermost SELECT has ORDER BY and no LIMIT/FETCH/OFFSET, flag due
-      to expensive global sort on large result sets.
-    remediation_instructions: >
-      Add LIMIT (for top-N) or refactor with window functions and early limiting.
-    bad_examples:
-      - "SELECT * FROM t ORDER BY ts DESC"
-    good_examples:
-      - "SELECT * FROM t ORDER BY ts DESC LIMIT 1000"
+    detect: "Top-level ORDER BY without LIMIT/FETCH on potentially large results."
+    fix: "Add LIMIT or implement window + early limit."
+    examples:
+      bad:
+        - "SELECT * FROM sales ORDER BY ts DESC"
+      good:
+        - "SELECT * FROM sales ORDER BY ts DESC LIMIT 1000"
 
   - id: ORDER_BY_NOT_OUTERMOST
-    name: ORDER BY in non-outer query
-    severity: warning
+    title: "ORDER BY in subquery"
+    severity: info
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If ORDER BY occurs mid-query (outside window functions), flag since pushing
-      ORDER BY to the outermost query is usually cheaper.
-    remediation_instructions: >
-      Move ORDER BY to the outermost SELECT or use window functions appropriately.
+    detect: "ORDER BY appears in subquery/intermediate step (not a window function)."
+    fix: "Remove intermediate sorts or move ORDER BY to the outermost query."
+    examples:
+      bad:
+        - "SELECT * FROM (SELECT * FROM t ORDER BY x) sub"
+      good:
+        - "SELECT * FROM t WHERE x>0 ORDER BY x"
 
   - id: REPEATED_CTE_EVALUATIONS
-    name: Repeated CTE evaluated multiple times
+    title: "CTE reused without materialization"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If the same CTE is referenced in multiple places and looks computationally
-      heavy, flag because it may be re-evaluated for each reference.
-    remediation_instructions: >
-      Materialize intermediate results using temporary tables/variables or restructure.
+    detect: "Same heavy CTE referenced multiple times; may be recomputed per reference."
+    fix: "Materialize to temp table or restructure to avoid repeated computation."
+    examples:
+      bad:
+        - "WITH heavy AS (SELECT ... FROM big GROUP BY ...) SELECT * FROM heavy h1 JOIN heavy h2 ON ..."
+      good:
+        - "CREATE TEMP TABLE heavy AS SELECT ...; SELECT * FROM heavy h1 JOIN heavy h2 ON ..."
 
   - id: REGEX_COSTLY_IN_WHERE
-    name: Costly REGEXP in WHERE
+    title: "Costly REGEXP in WHERE"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If WHERE uses REGEXP_CONTAINS/EXTRACT heavily on large scans, flag as costly.
-    remediation_instructions: >
-      Prefer equality/LIKE when possible; or precompute normalized fields and query them.
-    bad_examples:
-      - "WHERE REGEXP_CONTAINS(title, r'^[A-Z]{3}[0-9]+$')"
-    good_examples:
-      - "WHERE title LIKE 'ABC%'"
+    detect: "Heavy REGEXP_* on large scans; prefer LIKE/equality or precomputed fields."
+    fix: "Replace regex with simpler predicates or indexed/precomputed fields."
+    examples:
+      bad:
+        - "WHERE REGEXP_CONTAINS(message, r\"ERROR.*404\")"
+      good:
+        - "WHERE message LIKE '%ERROR%' AND status = 404"
 
   - id: UNNECESSARY_DISTINCT
-    name: Unnecessary DISTINCT
+    title: "Unnecessary DISTINCT"
     severity: info
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If DISTINCT is used on columns already unique by key semantics, or to mask
-      duplicates from a join, flag as likely unnecessary.
-    remediation_instructions: >
-      Remove DISTINCT or fix join keys/aggregations to avoid duplicate generation.
+    detect: "DISTINCT used where results are already unique (e.g., due to GROUP BY or primary key)."
+    fix: "Remove DISTINCT or correct join/aggregation producing duplicates."
+    examples:
+      bad:
+        - "SELECT DISTINCT user_id FROM (SELECT user_id, COUNT(*) c FROM clicks GROUP BY user_id)"
+      good:
+        - "SELECT user_id FROM (SELECT user_id, COUNT(*) c FROM clicks GROUP BY user_id)"
 
   - id: LARGE_RESULT_NO_MATERIALIZATION
-    name: Large result without materialization
-    severity: info
-    enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If query returns/writes extremely large result sets (e.g., prone to
-      "Response too large" or heavy I/O), flag.
-    remediation_instructions: >
-      Write to a destination table or reduce outputs; page results via API.
-
-  - id: SUBQUERY_IN_WHERE
-    name: Subquery in WHERE (replaceable by JOIN/EXISTS)
+    title: "Huge result not materialized"
     severity: warning
     enabled: true
-    requires_metadata: false
-    detection_instructions: >
-      If WHERE has IN/NOT IN subqueries that could be expressed as JOIN/EXISTS
-      to reduce re-evaluation or improve clarity, flag.
-    remediation_instructions: >
-      Replace with JOIN/EXISTS; for NOT IN guard for NULL semantics.
+    detect: "Query returns extremely large result to client instead of writing to a table."
+    fix: "Write results to a destination table or reduce output size with filters/LIMIT."
+    examples:
+      bad:
+        - "SELECT * FROM `project.dataset.page_views`"
+      good:
+        - "CREATE TABLE `project.dataset.page_views_sample` AS SELECT * FROM ... WHERE ..."
 
-  # (Optional) DML guidance — disabled by default for SELECT-focused linting
-  - id: SINGLE_ROW_DML
-    name: Single-row DML anti-pattern
+  - id: SUBQUERY_IN_WHERE
+    title: "Subquery in WHERE (IN/NOT IN)"
+    severity: warning
+    enabled: true
+    detect: "Filtering via subquery IN/NOT IN that could be JOIN/EXISTS for better efficiency."
+    fix: "Rewrite as JOIN/SEMI JOIN (EXISTS) when equivalent."
+    examples:
+      bad:
+        - "WHERE user_id IN (SELECT user_id FROM premium_users)"
+      good:
+        - "JOIN premium_users USING (user_id)"
+
+  - id: MISSING_LIMIT
+    title: "Missing LIMIT on large result"
     severity: info
-    enabled: false
-    requires_metadata: false
-    detection_instructions: >
-      If UPDATE/INSERT statements mutate single rows repeatedly, flag as OLTP anti-pattern.
-    remediation_instructions: >
-      Batch updates/inserts or use streaming/ELT patterns suited for BigQuery.
+    enabled: true
+    detect: "Query lacks LIMIT and may return many rows during exploration."
+    fix: "Add LIMIT for exploration; remove only when full output is required."
+    examples:
+      bad:
+        - "SELECT * FROM events WHERE event_type='CLICK'"
+      good:
+        - "SELECT * FROM events WHERE event_type='CLICK' LIMIT 1000"
+
+  - id: NO_WHERE_CLAUSE
+    title: "No WHERE on large table"
+    severity: error
+    enabled: true
+    detect: "Full-table scan with no WHERE filters on a large table."
+    fix: "Add selective WHERE predicates; for time-series, filter by date/partition."
+    examples:
+      bad:
+        - "SELECT * FROM `project.dataset.large_table`"
+      good:
+        - "SELECT * FROM `project.dataset.large_table` WHERE dt >= @start AND dt < @end"
+
+  - id: MULTIPLE_WILDCARD_TABLES
+    title: "Multiple wildcard sources"
+    severity: warning
+    enabled: true
+    detect: "Query uses multiple wildcard tables without tight filters, compounding scanned data."
+    fix: "Narrow each wildcard range or consolidate into a partitioned table."
+    examples:
+      bad:
+        - "FROM `project.dataset.a_*` a JOIN `project.dataset.b_*` b ON a.id=b.id"
+      good:
+        - "FROM `project.dataset.a_*` WHERE _TABLE_SUFFIX BETWEEN @s AND @e"
