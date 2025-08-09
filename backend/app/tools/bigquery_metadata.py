@@ -78,9 +78,12 @@ class BigQueryMetadataTool:
         return cleaned_tables
     
     def get_table_metadata(self, table_ref: str) -> Dict[str, Any]:
-        """Get actual metadata for a specific table"""
+        """Get actual metadata for a specific table, view, or wildcard pattern"""
         try:
             client = self._get_client()
+            
+            # Remove backticks if present
+            table_ref = table_ref.replace('`', '').strip()
             
             # Parse table reference
             parts = table_ref.split('.')
@@ -91,20 +94,51 @@ class BigQueryMetadataTool:
                 dataset, table = parts
             else:
                 project = self.project_id
-                dataset = "analytics"  # default dataset
+                dataset = os.getenv("BIGQUERY_DATASET", "analytics")  # Use env default
                 table = parts[0]
             
-            # Handle wildcard tables
-            if '%' in table or '*' in table:
+            # Don't modify dataset names - they can have numbers and underscores
+            # analytics_441577273 is a valid dataset name in BigQuery
+            
+            # Validate project ID - should not contain dots
+            # If project contains dots, it means we parsed incorrectly
+            if '.' in project:
+                logger.error(f"Invalid project ID '{project}' - contains dots, reparsing")
+                # This might mean the table reference was incorrectly parsed
+                # Re-parse assuming it's project.dataset.table
+                all_parts = table_ref.split('.')
+                if len(all_parts) >= 3:
+                    project = all_parts[0]
+                    dataset = all_parts[1] 
+                    table = '.'.join(all_parts[2:])  # Rest is table name
+                else:
+                    project = self.project_id
+            
+            # Handle wildcard tables (e.g., events_*, events_202*)
+            if '*' in table or '%' in table:
                 return self._get_wildcard_table_metadata(project, dataset, table.replace('*', '%'))
             
-            # Get table reference
-            table_ref = f"{project}.{dataset}.{table}"
-            table_obj = client.get_table(table_ref)
+            # Build full table reference
+            table_ref_full = f"{project}.{dataset}.{table}"
+            
+            # Try to get the table/view metadata
+            try:
+                table_obj = client.get_table(table_ref_full)
+            except NotFound:
+                # Handle table suffixes - might be a sharded table
+                if '_' in table and any(char.isdigit() for char in table.split('_')[-1]):
+                    base_table = '_'.join(table.split('_')[:-1])
+                    suffix = table.split('_')[-1]
+                    if suffix.isdigit() and len(suffix) >= 6:  # Likely a date suffix
+                        logger.info(f"Table {table} not found, checking for wildcard pattern {base_table}_*")
+                        return self._get_wildcard_table_metadata(project, dataset, f"{base_table}_%")
+                
+                # Table truly not found
+                raise NotFound(f"Table {table_ref_full} not found")
             
             # Get comprehensive metadata
             metadata = {
-                "table_path": table_ref,
+                "table_path": table_ref_full,
                 "project": project,
                 "dataset": dataset,
                 "table_name": table,
@@ -143,6 +177,12 @@ class BigQueryMetadataTool:
                 "location": table_obj.location if hasattr(table_obj, 'location') else None
             }
             
+            # For VIEWs, get the underlying table information
+            if table_obj.table_type == "VIEW":
+                view_definition = self._get_view_underlying_tables(table_obj, project, dataset, table)
+                if view_definition:
+                    metadata["view_definition"] = view_definition
+            
             return metadata
             
         except NotFound:
@@ -162,19 +202,118 @@ class BigQueryMetadataTool:
                 "row_count": 0
             }
     
+    def _get_view_underlying_tables(self, view_obj, project: str, dataset: str, view_name: str) -> Dict[str, Any]:
+        """Extract underlying table information from a view"""
+        try:
+            client = self._get_client()
+            
+            # Get view definition
+            view_query = view_obj.view_query if hasattr(view_obj, 'view_query') else None
+            
+            if not view_query:
+                # Try to get view definition from INFORMATION_SCHEMA
+                query = f"""
+                SELECT view_definition 
+                FROM `{project}.{dataset}.INFORMATION_SCHEMA.VIEWS`
+                WHERE table_name = '{view_name}'
+                """
+                try:
+                    result = list(client.query(query))
+                    if result:
+                        view_query = result[0].view_definition
+                except Exception as e:
+                    logger.warning(f"Could not fetch view definition from INFORMATION_SCHEMA: {e}")
+                    return None
+            
+            if not view_query:
+                return None
+            
+            # Extract table references from the view query
+            underlying_tables = self.extract_tables_from_query(view_query)
+            
+            # Get metadata for each underlying table
+            underlying_metadata = []
+            total_size_gb = 0
+            total_rows = 0
+            
+            for table_ref in underlying_tables:
+                try:
+                    # Get metadata for this underlying table
+                    table_metadata = self.get_table_metadata(table_ref)
+                    
+                    # Only include essential info to avoid recursion/bloat
+                    if "error" not in table_metadata:
+                        simplified_metadata = {
+                            "table_path": table_metadata.get("table_path"),
+                            "table_name": table_metadata.get("table_name"),
+                            "dataset": table_metadata.get("dataset"),
+                            "table_type": table_metadata.get("table_type"),
+                            "size_gb": table_metadata.get("size_gb", 0),
+                            "row_count": table_metadata.get("row_count", 0),
+                            "partitioned": table_metadata.get("partitioned", False),
+                            "partition_field": table_metadata.get("partition_field"),
+                            "clustered": table_metadata.get("clustered", False),
+                            "cluster_fields": table_metadata.get("cluster_fields", [])
+                        }
+                        underlying_metadata.append(simplified_metadata)
+                        total_size_gb += table_metadata.get("size_gb", 0)
+                        total_rows += table_metadata.get("row_count", 0)
+                except Exception as e:
+                    logger.warning(f"Could not get metadata for underlying table {table_ref}: {e}")
+                    underlying_metadata.append({
+                        "table_path": table_ref,
+                        "error": str(e)
+                    })
+            
+            return {
+                "sql": view_query[:500] + "..." if len(view_query) > 500 else view_query,  # Truncate long queries
+                "underlying_tables": underlying_metadata,
+                "underlying_tables_count": len(underlying_tables),
+                "total_underlying_size_gb": round(total_size_gb, 2),
+                "total_underlying_rows": total_rows,
+                "optimization_hints": [
+                    "Views don't store data - query performance depends on underlying tables",
+                    f"This view queries {len(underlying_tables)} table(s) totaling {round(total_size_gb, 2)} GB",
+                    "Consider materializing if frequently queried with similar filters",
+                    "Ensure underlying tables are properly partitioned and clustered"
+                ]
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error extracting view definition: {e}")
+            return None
+    
     def _get_wildcard_table_metadata(self, project: str, dataset: str, table_pattern: str) -> Dict[str, Any]:
         """Get aggregated metadata for wildcard tables"""
         try:
             client = self._get_client()
             
-            # Query to get all matching tables
+            # Don't modify dataset names - they are valid as-is
+            # analytics_441577273 is a valid dataset name in BigQuery
+            
+            # Validate project ID - should not contain dots or be a path
+            if '.' in project:
+                logger.error(f"Invalid project ID '{project}' - contains dots, using default project")
+                # This likely means we got passed something like "project.dataset" as project
+                # Use the default project ID instead
+                project = self.project_id
+            
+            # Use __TABLES__ meta-table for wildcard queries
+            # INFORMATION_SCHEMA doesn't work well with some datasets like GA4 exports
             query = f"""
             SELECT 
-                table_name,
+                table_id as table_name,
+                size_bytes,
                 row_count,
-                size_bytes
-            FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLE_STORAGE`
-            WHERE table_name LIKE '{table_pattern}'
+                TIMESTAMP_MILLIS(creation_time) as creation_time,
+                CASE 
+                    WHEN type = 1 THEN 'TABLE'
+                    WHEN type = 2 THEN 'VIEW'
+                    ELSE 'OTHER'
+                END as table_type
+            FROM `{project}.{dataset}.__TABLES__`
+            WHERE table_id LIKE '{table_pattern}'
+            ORDER BY table_id
             """
             
             result = client.query(query)
@@ -190,21 +329,46 @@ class BigQueryMetadataTool:
                 total_bytes += row.size_bytes or 0
                 tables_list.append(row.table_name)
             
+            # Get sample schema from first table
+            # For wildcard tables (like GA4 events_intraday_*), all tables have the same schema
+            sample_schema = []
+            column_names = []
+            if tables_list:
+                try:
+                    # Use the first matched table to get the schema
+                    sample_table_name = tables_list[0]
+                    logger.info(f"Fetching schema from sample table: {sample_table_name}")
+                    sample_table = client.get_table(f"{project}.{dataset}.{sample_table_name}")
+                    column_names = [field.name for field in sample_table.schema]
+                    # Only get limited schema details to avoid huge response
+                    sample_schema = self._extract_schema(sample_table.schema)[:20]  # Limit to 20 fields
+                    logger.info(f"Successfully fetched {len(column_names)} columns from {sample_table_name}")
+                except Exception as e:
+                    logger.warning(f"Could not get schema for sample table {tables_list[0]}: {e}")
+            
+            # For wildcard tables, we assume they're partitioned by table suffix
+            # GA4 export tables are typically partitioned this way
+            is_partitioned = '_' in table_pattern and table_count > 0
+            
             return {
-                "table_path": f"{project}.{dataset}.{table_pattern}",
+                "table_path": f"{project}.{dataset}.{table_pattern.replace('%', '*')}",
                 "project": project,
                 "dataset": dataset,
-                "table_name": table_pattern,
+                "table_name": table_pattern.replace('%', '*'),
                 "is_wildcard": True,
                 "table_count": table_count,
-                "tables_matched": tables_list[:5],  # First 5 tables
+                "tables_matched": tables_list[:10],  # First 10 tables
                 "row_count": total_rows,
                 "size_bytes": total_bytes,
                 "size_gb": round(total_bytes / (1024**3), 2),
-                "partitioned": True,  # Wildcard tables are typically partitioned
-                "partition_field": "_TABLE_SUFFIX",
-                "clustered": False,
-                "cluster_fields": []
+                "size_mb": round(total_bytes / (1024**2), 2),
+                "partitioned": is_partitioned,
+                "partition_field": "_TABLE_SUFFIX" if is_partitioned else None,
+                "clustered": False,  # Can't determine from __TABLES__
+                "cluster_fields": [],
+                "column_names": column_names,
+                "schema": sample_schema[:10] if sample_schema else [],  # Limit schema size
+                "column_count": len(column_names)
             }
             
         except Exception as e:
@@ -230,7 +394,7 @@ class BigQueryMetadataTool:
                 SUM(row_count) as total_rows,
                 MAX(creation_time) as latest_table_created,
                 MIN(creation_time) as oldest_table_created
-            FROM `{self.project_id}.{dataset_id}.INFORMATION_SCHEMA.TABLE_STORAGE`
+            FROM `{self.project_id}.{dataset_id}`.INFORMATION_SCHEMA.TABLE_STORAGE
             WHERE table_schema = '{dataset_id}'
             """
             
@@ -270,7 +434,7 @@ class BigQueryMetadataTool:
             "summary": f"Found {len(tables)} table(s) totaling {round(total_size_gb, 2)}GB with {total_rows:,} rows"
         }
 
-# Create a function that can be used as an ADK tool
+# Create functions that can be used as ADK tools
 def fetch_bigquery_metadata(query: str) -> str:
     """
     Fetch actual BigQuery metadata for tables in the query.
@@ -285,3 +449,51 @@ def fetch_bigquery_metadata(query: str) -> str:
     tool = BigQueryMetadataTool()
     metadata = tool.get_query_metadata(query)
     return json.dumps(metadata, indent=2)
+
+def fetch_tables_metadata(table_paths: list[str]) -> str:
+    """
+    Fetch BigQuery metadata for specific table paths.
+    
+    Args:
+        table_paths: List of table paths (e.g., ["project.dataset.table", "dataset.table", "table"])
+    
+    Returns:
+        JSON string with detailed metadata for each table
+    """
+    import json
+    tool = BigQueryMetadataTool()
+    
+    metadata_list = []
+    total_size_gb = 0
+    total_rows = 0
+    
+    for table_path in table_paths:
+        try:
+            # Get metadata for each table
+            metadata = tool.get_table_metadata(table_path)
+            
+            # Add to list even if there was an error (to show which tables couldn't be found)
+            metadata_list.append(metadata)
+            
+            # Accumulate totals only for successful fetches
+            if "error" not in metadata:
+                total_size_gb += metadata.get("size_gb", 0)
+                total_rows += metadata.get("row_count", 0)
+        except Exception as e:
+            # Add error entry for this table
+            metadata_list.append({
+                "table_path": table_path,
+                "error": str(e),
+                "size_gb": 0,
+                "row_count": 0
+            })
+    
+    result = {
+        "tables_found": len(table_paths),
+        "total_size_gb": round(total_size_gb, 2),
+        "total_row_count": total_rows,
+        "tables": metadata_list,
+        "summary": f"Found {len(table_paths)} table(s) totaling {round(total_size_gb, 2)}GB with {total_rows:,} rows"
+    }
+    
+    return json.dumps(result, indent=2)

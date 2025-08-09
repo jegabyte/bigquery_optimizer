@@ -610,21 +610,9 @@ const AnalysisResult = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
                 >
-                  <div className="space-y-2">
-                    {stageData.metadata.tables && stageData.metadata.tables.map((table, idx) => (
-                      <div key={idx} className="border-l-2 border-blue-400 pl-3">
-                        <div className="font-medium text-sm">{table.table_name}</div>
-                        <div className="text-xs text-gray-600">
-                          {table.row_count?.toLocaleString()} rows • {table.size_gb}GB
-                          {table.partitioned && ` • Partitioned on ${table.partition_field}`}
-                          {table.clustered && ` • Clustered on ${table.cluster_fields?.join(', ')}`}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Columns: {table.column_names?.join(', ')}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto">
+                    {JSON.stringify(stageData.metadata, null, 2)}
+                  </pre>
                 </motion.div>
               )}
             </div>

@@ -1,12 +1,144 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
-import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus, FiTrendingDown, FiZap, FiActivity } from 'react-icons/fi';
+import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus, FiTrendingDown, FiZap, FiActivity, FiLayout, FiCode } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { analyses } from '../services/database';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
 import { optimizeQueryWithADK, testADKConnection } from '../services/adk';
+
+// BigQuery-style SQL Formatter
+const formatSQL = (sql) => {
+  if (!sql) return '';
+  
+  // Remove extra whitespace and normalize
+  let formatted = sql.replace(/\s+/g, ' ').trim();
+  
+  // Replace backticks if needed (BigQuery uses backticks)
+  formatted = formatted.replace(/"/g, '`');
+  
+  // Handle SELECT with column list
+  formatted = formatted.replace(/\bSELECT\s+(.*?)\s+FROM\b/gi, (match, columns) => {
+    // If it's SELECT *, keep it simple
+    if (columns.trim() === '*') {
+      return 'SELECT\n  *\nFROM';
+    }
+    
+    // Split columns and format them
+    const columnList = columns.split(',').map(col => col.trim());
+    const formattedColumns = columnList.map((col, idx) => {
+      if (idx === 0) {
+        return `  ${col}`;
+      }
+      return `  ${col}`;
+    }).join(',\n');
+    
+    return `SELECT\n${formattedColumns}\nFROM`;
+  });
+  
+  // Handle FROM clause with proper spacing
+  formatted = formatted.replace(/\bFROM\s+/gi, 'FROM\n  ');
+  
+  // Handle JOIN clauses - BigQuery style
+  formatted = formatted.replace(/\b(LEFT|RIGHT|INNER|FULL|CROSS)?\s*(JOIN)\b/gi, (match) => {
+    return '\n' + match.toUpperCase();
+  });
+  
+  // Handle ON clause for JOINs
+  formatted = formatted.replace(/\bON\b/gi, '\n  ON');
+  
+  // Handle WHERE clause
+  formatted = formatted.replace(/\bWHERE\b/gi, '\nWHERE');
+  
+  // Handle AND/OR in WHERE clause - indent them
+  formatted = formatted.replace(/\b(AND|OR)\b/gi, (match) => {
+    return '\n  ' + match.toUpperCase();
+  });
+  
+  // Handle GROUP BY
+  formatted = formatted.replace(/\bGROUP\s+BY\b/gi, '\nGROUP BY');
+  
+  // Handle ORDER BY
+  formatted = formatted.replace(/\bORDER\s+BY\b/gi, '\nORDER BY');
+  
+  // Handle HAVING
+  formatted = formatted.replace(/\bHAVING\b/gi, '\nHAVING');
+  
+  // Handle LIMIT
+  formatted = formatted.replace(/\bLIMIT\b/gi, '\nLIMIT');
+  
+  // Handle OFFSET
+  formatted = formatted.replace(/\bOFFSET\b/gi, '\nOFFSET');
+  
+  // Handle WITH clause (CTEs)
+  formatted = formatted.replace(/\bWITH\b/gi, 'WITH');
+  formatted = formatted.replace(/\bAS\s*\(/gi, ' AS (');
+  
+  // Handle UNION
+  formatted = formatted.replace(/\bUNION(\s+ALL)?\b/gi, (match) => {
+    return '\n' + match.toUpperCase();
+  });
+  
+  // Handle CASE statements
+  formatted = formatted.replace(/\bCASE\b/gi, '\n    CASE');
+  formatted = formatted.replace(/\bWHEN\b/gi, '\n      WHEN');
+  formatted = formatted.replace(/\bTHEN\b/gi, ' THEN');
+  formatted = formatted.replace(/\bELSE\b/gi, '\n      ELSE');
+  formatted = formatted.replace(/\bEND\b/gi, '\n    END');
+  
+  // Handle subqueries - add newline after opening parenthesis
+  formatted = formatted.replace(/\(\s*SELECT/gi, '(\n  SELECT');
+  
+  // Clean up multiple newlines
+  formatted = formatted.replace(/\n\s*\n/g, '\n');
+  
+  // Fix indentation for specific patterns
+  const lines = formatted.split('\n');
+  let inSubquery = 0;
+  const finalLines = lines.map((line) => {
+    const trimmed = line.trim();
+    
+    // Track subquery depth
+    const openParens = (line.match(/\(/g) || []).length;
+    const closeParens = (line.match(/\)/g) || []).length;
+    inSubquery += openParens - closeParens;
+    
+    // Apply consistent indentation based on context
+    if (inSubquery > 0 && !trimmed.startsWith('SELECT')) {
+      return '    ' + trimmed;
+    }
+    
+    // Already indented lines
+    if (line.startsWith('  ')) {
+      return line;
+    }
+    
+    // Main clauses
+    if (trimmed.match(/^(SELECT|FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|WITH|UNION)/)) {
+      return trimmed;
+    }
+    
+    // JOIN clauses
+    if (trimmed.match(/^(LEFT|RIGHT|INNER|FULL|CROSS)?\s*JOIN/i)) {
+      return trimmed;
+    }
+    
+    // ON clauses for JOINs
+    if (trimmed.startsWith('ON')) {
+      return '  ' + trimmed;
+    }
+    
+    // AND/OR in WHERE
+    if (trimmed.match(/^(AND|OR)/i)) {
+      return '  ' + trimmed;
+    }
+    
+    return line;
+  });
+  
+  return finalLines.join('\n').trim();
+};
 
 const AnalysisResult = () => {
   const { analysisId } = useParams();
@@ -36,11 +168,32 @@ const AnalysisResult = () => {
   const [selectedStage, setSelectedStage] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState(null);
+  
+  // UI state for stage views
+  const [metadataView, setMetadataView] = useState('rendered');
+  const [rulesView, setRulesView] = useState('rendered');
+  const [optimizationView, setOptimizationView] = useState('rendered');
+  const [reportView, setReportView] = useState('rendered');
+  const [copied, setCopied] = useState(false);
+  const [copiedStage, setCopiedStage] = useState(null);
 
   // Helper to get stage data from either stageData or result.metadata.stages
   const getStageData = (stageName) => {
-    if (stageData[stageName]) return stageData[stageName];
-    if (result?.metadata?.stages?.[stageName]) return result.metadata.stages[stageName];
+    // Check stageData first
+    if (stageData && stageData[stageName]) {
+      return stageData[stageName];
+    }
+    
+    // Check result.metadata.stages
+    if (result?.metadata?.stages?.[stageName]) {
+      return result.metadata.stages[stageName];
+    }
+    
+    // For final report, also check if it exists directly in result
+    if (stageName === 'report' && result?.metadata?.final_report) {
+      return result.metadata.final_report;
+    }
+    
     return null;
   };
 
@@ -69,15 +222,22 @@ const AnalysisResult = () => {
         
         // Load stage data - check both stageData and result.metadata.stages
         if (analysisData.stageData) {
+          console.log('Loading stageData from saved analysis:', analysisData.stageData);
           setStageData(analysisData.stageData);
         } else if (analysisData.result?.metadata?.stages) {
+          console.log('Loading stageData from result.metadata.stages:', analysisData.result.metadata.stages);
           setStageData(analysisData.result.metadata.stages);
+        } else {
+          console.log('No stage data found in saved analysis');
         }
         
         setOriginalQuery(analysisData.query);
         setOriginalOptions(analysisData.options);
         setMode('view');
         setAnalysisStatus('completed');
+        // Reset currentStep when loading completed analysis
+        setCurrentStep(-1);
+        setShowProgress(false);
         return;
       }
       
@@ -328,6 +488,24 @@ const AnalysisResult = () => {
       };
       localStorage.setItem(`analysis-result-${analysisId}`, JSON.stringify(analysisData));
       
+      // Also save to IndexedDB for permanent storage
+      try {
+        await analyses.create({
+          analysisId: analysisId,
+          query: query,
+          originalQuery: query,
+          optimizedQuery: finalResult.optimizedQuery,
+          issues: finalResult.issues,
+          validationResult: finalResult.validationResult,
+          metadata: finalResult.metadata,
+          options: options,
+          stageData: stageData
+        });
+      } catch (dbError) {
+        console.error('Failed to save to database:', dbError);
+        // Continue even if DB save fails - localStorage has the data
+      }
+      
       // Clear the temporary analysis data
       localStorage.removeItem(`analysis-${analysisId}`);
       
@@ -364,16 +542,53 @@ const AnalysisResult = () => {
 
   const handleNewAnalysis = () => {
     const newId = `analysis-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    navigate(`/analysis/${newId}/new`);
+    // Clear local storage for clean new analysis
+    localStorage.removeItem(`analysis-${analysisId}`);
+    // Navigate to new analysis with forced reload
+    window.location.href = `/analysis/${newId}/new`;
   };
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard!');
   };
 
-  const shareUrl = () => {
-    const url = window.location.href;
+  const shareUrl = async () => {
+    // Ensure the current analysis is saved before sharing
+    if (result && !result.error) {
+      const analysisData = {
+        id: analysisId,
+        query: query,
+        options: options,
+        result: result,
+        stageData: stageData,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save to localStorage to ensure it's available when link is accessed
+      localStorage.setItem(`analysis-result-${analysisId}`, JSON.stringify(analysisData));
+      
+      // Also try to save to database for persistence
+      try {
+        const existing = await analyses.getByAnalysisId(analysisId);
+        if (!existing) {
+          await analyses.create({
+            analysisId: analysisId,
+            query: query,
+            originalQuery: query,
+            optimizedQuery: result.optimizedQuery,
+            issues: result.issues,
+            validationResult: result.validationResult,
+            metadata: result.metadata,
+            options: options,
+            stageData: stageData
+          });
+        }
+      } catch (dbError) {
+        console.error('Failed to save to database:', dbError);
+      }
+    }
+    
+    const url = window.location.href.replace('/new', '');
     navigator.clipboard.writeText(url);
     toast.success('Share URL copied to clipboard!');
   };
@@ -426,28 +641,28 @@ const AnalysisResult = () => {
     <div className="max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard')} className="p-2 hover:bg-gray-100 rounded-lg">
+          <button onClick={() => navigate('/query-analysis')} className="p-2 hover:bg-gray-100 rounded-lg">
             <FiArrowLeft className="h-5 w-5" />
           </button>
           <h1 className="text-2xl font-bold text-gray-900">
-            {isNew ? 'New Analysis' : mode === 'edit' ? 'Edit Analysis' : 'Analysis Results'}
+            {isNew ? 'New Analysis' : `Analysis: ${analysisId.substring(0, 20)}...`}
           </h1>
         </div>
         
         <div className="flex items-center gap-2">
           {mode === 'view' && result && (
             <>
-              <button onClick={shareUrl} className="btn-secondary btn-sm">
-                <FiShare2 className="h-4 w-4 mr-1" />
-                Share
+              <button onClick={shareUrl} className="btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5">
+                <FiShare2 className="h-4 w-4" />
+                <span>Share</span>
               </button>
-              <button onClick={handleEditMode} className="btn-secondary btn-sm">
-                <FiEdit3 className="h-4 w-4 mr-1" />
-                Edit Query
+              <button onClick={handleEditMode} className="btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5">
+                <FiEdit3 className="h-4 w-4" />
+                <span>Edit Query</span>
               </button>
-              <button onClick={handleNewAnalysis} className="btn-primary btn-sm">
-                <FiPlus className="h-4 w-4 mr-1" />
-                New Analysis
+              <button onClick={handleNewAnalysis} className="btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5">
+                <FiPlus className="h-4 w-4" />
+                <span>New Analysis</span>
               </button>
             </>
           )}
@@ -505,20 +720,20 @@ const AnalysisResult = () => {
             <button
               onClick={handleAnalyze}
               disabled={loading || !query.trim()}
-              className="btn-primary"
+              className="btn-primary px-4 py-2 flex items-center gap-2"
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Analyzing...
+                  <span>Analyzing...</span>
                 </>
               ) : (
                 <>
-                  <FiPlay className="h-4 w-4 mr-1" />
-                  Analyze Query
+                  <FiPlay className="h-4 w-4" />
+                  <span>Analyze Query</span>
                 </>
               )}
             </button>
@@ -537,9 +752,13 @@ const AnalysisResult = () => {
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-lg font-semibold text-gray-900">Original Query</h3>
             <button
-              onClick={() => copyToClipboard(originalQuery)}
+              onClick={() => {
+                const formatted = formatSQL(originalQuery);
+                copyToClipboard(formatted);
+                toast.success('Formatted query copied!');
+              }}
               className="btn-secondary btn-sm"
-              title="Copy to clipboard"
+              title="Copy formatted query"
             >
               <FiCopy className="h-4 w-4" />
             </button>
@@ -548,7 +767,7 @@ const AnalysisResult = () => {
             <MonacoEditor
               height="200px"
               defaultLanguage="sql"
-              value={originalQuery}
+              value={formatSQL(originalQuery)}
               theme="vs-light"
               options={{
                 readOnly: true,
@@ -557,9 +776,11 @@ const AnalysisResult = () => {
                 lineNumbers: 'on',
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
-                wordWrap: 'on',
-                formatOnPaste: true,
-                formatOnType: true
+                wordWrap: 'off',
+                renderWhitespace: 'none',
+                folding: true,
+                lineDecorationsWidth: 0,
+                lineNumbersMinChars: 3
               }}
             />
           </div>
@@ -616,21 +837,114 @@ const AnalysisResult = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
                 >
-                  <div className="space-y-2">
-                    {getStageData('metadata').tables && getStageData('metadata').tables.map((table, idx) => (
-                      <div key={idx} className="border-l-2 border-blue-400 pl-3">
-                        <div className="font-medium text-sm">{table.table_name}</div>
-                        <div className="text-xs text-gray-600">
-                          {table.row_count?.toLocaleString()} rows • {table.size_gb}GB
-                          {table.partitioned && ` • Partitioned on ${table.partition_field}`}
-                          {table.clustered && ` • Clustered on ${table.cluster_fields?.join(', ')}`}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Columns: {table.column_names?.join(', ')}
-                        </div>
-                      </div>
-                    ))}
+                  {/* View toggle and copy button */}
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setMetadataView('rendered')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          (!metadataView || metadataView === 'rendered') 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiLayout className="inline mr-1" />
+                        Formatted View
+                      </button>
+                      <button
+                        onClick={() => setMetadataView('json')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          metadataView === 'json' 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiCode className="inline mr-1" />
+                        Raw JSON
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(JSON.stringify(getStageData('metadata'), null, 2));
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+                    >
+                      {copied ? <FiCheck className="text-green-600" /> : <FiCopy />}
+                      {copied ? 'Copied!' : 'Copy JSON'}
+                    </button>
                   </div>
+
+                  {/* Rendered view */}
+                  {(!metadataView || metadataView === 'rendered') && (
+                    <div className="space-y-3">
+                      {getStageData('metadata').tables && getStageData('metadata').tables.map((table, idx) => (
+                        <div key={idx} className="border-l-4 border-blue-400 pl-4 py-2 bg-gray-50 rounded">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-semibold text-sm">{table.table_name}</span>
+                            {table.table_type === 'VIEW' && (
+                              <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">VIEW</span>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-gray-500">Rows:</span> {table.row_count?.toLocaleString()}
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Size:</span> {table.size_gb}GB
+                            </div>
+                            {table.partitioned && (
+                              <div className="col-span-2">
+                                <span className="text-gray-500">Partitioned:</span> ✓ on {table.partition_field}
+                              </div>
+                            )}
+                            {table.clustered && (
+                              <div className="col-span-2">
+                                <span className="text-gray-500">Clustered:</span> ✓ on {table.cluster_fields?.join(', ')}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* View underlying tables */}
+                          {table.view_definition && (
+                            <div className="mt-3 p-2 bg-purple-50 rounded">
+                              <div className="text-xs font-semibold text-purple-700 mb-2">
+                                Underlying Tables ({table.view_definition.underlying_tables_count}):
+                              </div>
+                              {table.view_definition.underlying_tables?.map((ut, utIdx) => (
+                                <div key={utIdx} className="text-xs ml-2 mb-1">
+                                  • {ut.table_name}: {ut.size_gb}GB, {ut.row_count?.toLocaleString()} rows
+                                  {ut.partitioned && ' (Partitioned)'}
+                                  {ut.clustered && ' (Clustered)'}
+                                </div>
+                              ))}
+                              <div className="text-xs text-purple-600 mt-2">
+                                Total: {table.view_definition.total_underlying_size_gb}GB, 
+                                {' '}{table.view_definition.total_underlying_rows?.toLocaleString()} rows
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="mt-2 text-xs text-gray-500">
+                            <span className="font-medium">Columns ({table.column_names?.length}):</span>
+                            <span className="ml-2">
+                              {table.column_names?.slice(0, 5).join(', ')}
+                              {table.column_names?.length > 5 && ` ... +${table.column_names.length - 5} more`}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* JSON view */}
+                  {metadataView === 'json' && (
+                    <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" style={{maxHeight: '400px', overflowY: 'auto'}}>
+                      {JSON.stringify(getStageData('metadata'), null, 2)}
+                    </pre>
+                  )}
                 </motion.div>
               )}
             </div>
@@ -676,16 +990,96 @@ const AnalysisResult = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-yellow-200"
                 >
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Compliance Score: {getStageData('rules').compliance_score}%</div>
-                    {getStageData('rules').violations && getStageData('rules').violations.map((violation, idx) => (
-                      <div key={idx} className="border-l-2 border-yellow-400 pl-3">
-                        <div className="font-medium text-sm">{violation.rule_id}</div>
-                        <div className="text-xs text-gray-600">{violation.fix}</div>
-                        <div className="text-xs text-red-600">Impact: {violation.impact}</div>
-                      </div>
-                    ))}
+                  {/* View toggle and copy button */}
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setRulesView('rendered')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          rulesView === 'rendered' 
+                            ? 'bg-yellow-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiLayout className="inline mr-1" />
+                        Formatted View
+                      </button>
+                      <button
+                        onClick={() => setRulesView('json')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          rulesView === 'json' 
+                            ? 'bg-yellow-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiCode className="inline mr-1" />
+                        Raw JSON
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(JSON.stringify(getStageData('rules'), null, 2));
+                        setCopiedStage('rules');
+                        setTimeout(() => setCopiedStage(null), 2000);
+                      }}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+                    >
+                      {copiedStage === 'rules' ? <FiCheck className="text-green-600" /> : <FiCopy />}
+                      {copiedStage === 'rules' ? 'Copied!' : 'Copy JSON'}
+                    </button>
                   </div>
+
+                  {/* Rendered view */}
+                  {rulesView === 'rendered' && (
+                    <div className="space-y-3">
+                      <div className="bg-yellow-50 p-3 rounded">
+                        <div className="text-sm font-semibold mb-2">Compliance Analysis</div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-gray-500">Rules Checked:</span> {getStageData('rules').rules_checked}
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Violations Found:</span> {getStageData('rules').violations_found}
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Compliance Score:</span> {getStageData('rules').compliance_score}%
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Status:</span> 
+                            <span className={`ml-1 ${getStageData('rules').compliance_score >= 90 ? 'text-green-600' : 'text-yellow-600'}`}>
+                              {getStageData('rules').compliance_score >= 90 ? 'Good' : 'Needs Improvement'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {getStageData('rules').violations && getStageData('rules').violations.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-xs font-semibold text-yellow-700">Violations Found:</div>
+                          {getStageData('rules').violations.map((violation, idx) => (
+                            <div key={idx} className="border-l-4 border-yellow-400 pl-3 py-2 bg-gray-50 rounded">
+                              <div className="font-medium text-sm">{violation.rule_id}</div>
+                              <div className="text-xs text-gray-600 mt-1">
+                                <span className="font-medium">Fix:</span> {violation.fix}
+                              </div>
+                              {violation.impact && (
+                                <div className="text-xs text-red-600 mt-1">
+                                  <span className="font-medium">Impact:</span> {violation.impact}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* JSON view */}
+                  {rulesView === 'json' && (
+                    <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" style={{maxHeight: '400px', overflowY: 'auto'}}>
+                      {JSON.stringify(getStageData('rules'), null, 2)}
+                    </pre>
+                  )}
                 </motion.div>
               )}
             </div>
@@ -731,24 +1125,90 @@ const AnalysisResult = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
                 >
-                  <div className="space-y-2">
-                    {getStageData('optimization').steps && getStageData('optimization').steps.map((step, idx) => (
-                      <div key={idx} className="border-l-2 border-blue-400 pl-3">
-                        <div className="font-medium text-sm">Step {step.step}: {step.optimization}</div>
-                        <div className="text-xs text-green-600">{step.improvement}</div>
-                        {step.bytes_saved && (
-                          <div className="text-xs text-gray-500">Saved: {step.bytes_saved}</div>
-                        )}
-                      </div>
-                    ))}
-                    {getStageData('optimization').total_improvement && (
-                      <div className="mt-2 pt-2 border-t">
-                        <div className="text-sm font-medium text-green-700">
-                          Total: {getStageData('optimization').total_improvement}
-                        </div>
-                      </div>
-                    )}
+                  {/* View toggle and copy button */}
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setOptimizationView('rendered')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          optimizationView === 'rendered' 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiLayout className="inline mr-1" />
+                        Formatted View
+                      </button>
+                      <button
+                        onClick={() => setOptimizationView('json')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          optimizationView === 'json' 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiCode className="inline mr-1" />
+                        Raw JSON
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(JSON.stringify(getStageData('optimization'), null, 2));
+                        setCopiedStage('optimization');
+                        setTimeout(() => setCopiedStage(null), 2000);
+                      }}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+                    >
+                      {copiedStage === 'optimization' ? <FiCheck className="text-green-600" /> : <FiCopy />}
+                      {copiedStage === 'optimization' ? 'Copied!' : 'Copy JSON'}
+                    </button>
                   </div>
+
+                  {/* Rendered view */}
+                  {optimizationView === 'rendered' && (
+                    <div className="space-y-3">
+                      {getStageData('optimization').steps && getStageData('optimization').steps.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-xs font-semibold text-blue-700">Optimization Steps:</div>
+                          {getStageData('optimization').steps.map((step, idx) => (
+                            <div key={idx} className="border-l-4 border-blue-400 pl-3 py-2 bg-gray-50 rounded">
+                              <div className="font-medium text-sm">
+                                Step {step.step}: {step.optimization}
+                              </div>
+                              <div className="text-xs text-green-600 mt-1">
+                                <span className="font-medium">Improvement:</span> {step.improvement}
+                              </div>
+                              {step.bytes_saved && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  <span className="font-medium">Data Saved:</span> {step.bytes_saved}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {getStageData('optimization').total_improvement && (
+                        <div className="bg-green-50 p-3 rounded">
+                          <div className="text-sm font-semibold text-green-700">
+                            Total Improvement: {getStageData('optimization').total_improvement}
+                          </div>
+                          {getStageData('optimization').total_optimizations && (
+                            <div className="text-xs text-gray-600 mt-1">
+                              Applied {getStageData('optimization').total_optimizations} optimization(s)
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* JSON view */}
+                  {optimizationView === 'json' && (
+                    <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" style={{maxHeight: '400px', overflowY: 'auto'}}>
+                      {JSON.stringify(getStageData('optimization'), null, 2)}
+                    </pre>
+                  )}
                 </motion.div>
               )}
             </div>
@@ -794,28 +1254,128 @@ const AnalysisResult = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
                 >
-                  <div className="space-y-3">
-                    {getStageData('report').executive_summary && (
-                      <div>
-                        <div className="text-sm font-medium mb-1">Executive Summary</div>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div>Cost: {getStageData('report').executive_summary.cost_reduction}</div>
-                          <div>Speed: {getStageData('report').executive_summary.performance_gain}</div>
-                          <div>Data: {getStageData('report').executive_summary.data_reduction}</div>
-                        </div>
-                      </div>
-                    )}
-                    {getStageData('report').recommendations && (
-                      <div>
-                        <div className="text-sm font-medium mb-1">Recommendations</div>
-                        <ul className="text-xs text-gray-600 space-y-1">
-                          {getStageData('report').recommendations.slice(0, 3).map((rec, idx) => (
-                            <li key={idx}>• {rec}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                  {/* View toggle and copy button */}
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setReportView('rendered')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          reportView === 'rendered' 
+                            ? 'bg-green-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiLayout className="inline mr-1" />
+                        Formatted View
+                      </button>
+                      <button
+                        onClick={() => setReportView('json')}
+                        className={`px-3 py-1 text-xs rounded ${
+                          reportView === 'json' 
+                            ? 'bg-green-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FiCode className="inline mr-1" />
+                        Raw JSON
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(JSON.stringify(getStageData('report'), null, 2));
+                        setCopiedStage('report');
+                        setTimeout(() => setCopiedStage(null), 2000);
+                      }}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+                    >
+                      {copiedStage === 'report' ? <FiCheck className="text-green-600" /> : <FiCopy />}
+                      {copiedStage === 'report' ? 'Copied!' : 'Copy JSON'}
+                    </button>
                   </div>
+
+                  {/* Rendered view */}
+                  {reportView === 'rendered' && (
+                    <div className="space-y-3">
+                      {getStageData('report').executive_summary && (
+                        <div className="bg-green-50 p-3 rounded">
+                          <div className="text-sm font-semibold mb-2">Executive Summary</div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-gray-500">Cost Reduction:</span> 
+                              <span className="font-semibold text-green-600 ml-1">{getStageData('report').executive_summary.cost_reduction}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Performance:</span> 
+                              <span className="font-semibold text-blue-600 ml-1">{getStageData('report').executive_summary.performance_gain}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Data Saved:</span> 
+                              <span className="font-semibold ml-1">{getStageData('report').executive_summary.data_reduction}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Complexity:</span> 
+                              <span className="ml-1">
+                                {getStageData('report').executive_summary.original_complexity} → {getStageData('report').executive_summary.optimized_complexity}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {getStageData('report').optimization_summary && (
+                        <div className="bg-blue-50 p-3 rounded">
+                          <div className="text-sm font-semibold mb-2">Optimization Results</div>
+                          <div className="text-xs space-y-1">
+                            <div>
+                              <span className="text-gray-500">Steps Applied:</span> {getStageData('report').optimization_summary.steps_taken}
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Est. Cost Before:</span> {getStageData('report').optimization_summary.estimated_cost_before}
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Est. Cost After:</span> 
+                              <span className="font-semibold text-green-600 ml-1">{getStageData('report').optimization_summary.estimated_cost_after}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {getStageData('report').recommendations && (
+                        <div>
+                          <div className="text-sm font-semibold mb-2">Recommendations</div>
+                          <ul className="text-xs text-gray-600 space-y-1">
+                            {getStageData('report').recommendations.map((rec, idx) => (
+                              <li key={idx} className="flex">
+                                <span className="text-blue-500 mr-2">•</span>
+                                <span>{rec}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {getStageData('report').best_practices && (
+                        <div>
+                          <div className="text-sm font-semibold mb-2">Best Practices</div>
+                          <ul className="text-xs text-gray-600 space-y-1">
+                            {getStageData('report').best_practices.map((practice, idx) => (
+                              <li key={idx} className="flex">
+                                <span className="text-green-500 mr-2">✓</span>
+                                <span>{practice}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* JSON view */}
+                  {reportView === 'json' && (
+                    <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" style={{maxHeight: '400px', overflowY: 'auto'}}>
+                      {JSON.stringify(getStageData('report'), null, 2)}
+                    </pre>
+                  )}
                 </motion.div>
               )}
             </div>
@@ -863,18 +1423,21 @@ const AnalysisResult = () => {
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-lg font-semibold text-gray-900">Optimized Query</h3>
             <button
-              onClick={() => copyToClipboard(result.optimizedQuery)}
+              onClick={() => {
+                const formatted = formatSQL(result.optimizedQuery);
+                copyToClipboard(formatted);
+              }}
               className="btn-secondary btn-sm"
-              title="Copy to clipboard"
+              title="Copy query"
             >
               <FiCopy className="h-4 w-4" />
             </button>
           </div>
           <div className="border rounded-lg overflow-hidden bg-green-50">
             <MonacoEditor
-              height="200px"
+              height="300px"
               defaultLanguage="sql"
-              value={result.optimizedQuery}
+              value={formatSQL(result.optimizedQuery)}
               theme="vs-light"
               options={{
                 readOnly: true,
@@ -883,13 +1446,17 @@ const AnalysisResult = () => {
                 lineNumbers: 'on',
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
-                wordWrap: 'on',
+                wordWrap: 'off',
                 formatOnPaste: true,
-                formatOnType: true
+                formatOnType: true,
+                renderWhitespace: 'none',
+                folding: true,
+                lineDecorationsWidth: 0,
+                lineNumbersMinChars: 3
               }}
             />
           </div>
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-end items-center">
             <span className="text-sm text-green-600 font-medium">✓ Optimized for better performance</span>
           </div>
         </div>

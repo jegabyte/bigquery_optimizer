@@ -298,6 +298,14 @@ export async function optimizeQueryWithADK(query, options = {}) {
                   
                   // Call onStageComplete if this is a complete stage and we have stageData
                   if (stageData && options.onStageComplete) {
+                    console.log(`Checking stage callbacks for ${author}:`, {
+                      hasStageData: !!stageData,
+                      hasCallback: !!options.onStageComplete,
+                      author: author,
+                      hasExecutiveSummary: stageData.executive_summary !== undefined,
+                      hasOptimizationSummary: stageData.optimization_summary !== undefined
+                    });
+                    
                     if ((author === 'rule_checker' || author === 'rule-checker') && 
                                (stageData.rules_checked !== undefined || stageData.violations !== undefined)) {
                       console.log('%c📊 Calling onStageComplete for RULES', 'color: blue; font-weight: bold');
@@ -310,7 +318,14 @@ export async function optimizeQueryWithADK(query, options = {}) {
                                (stageData.executive_summary !== undefined || stageData.optimization_summary !== undefined)) {
                       console.log('%c📊 Calling onStageComplete for REPORT', 'color: blue; font-weight: bold');
                       options.onStageComplete('report', stageData);
+                    } else {
+                      console.warn(`No matching callback condition for ${author}`, stageData);
                     }
+                  } else {
+                    console.warn('Missing stageData or onStageComplete:', {
+                      hasStageData: !!stageData,
+                      hasCallback: !!options.onStageComplete
+                    });
                   }
                 } catch (e) {
                   console.error('Outer error in stage processing:', e);
@@ -421,9 +436,19 @@ export async function optimizeQueryWithADK(query, options = {}) {
       return parseADKResponse(lastDataEvent.data, events);
     }
     
-    // Check if we only got orchestrator messages (incomplete response)
-    const orchestratorOnly = events.every(e => e.author === 'streaming_orchestrator');
-    if (orchestratorOnly) {
+    // Check if we got any stage completion events
+    const hasStageEvents = events.some(e => 
+      e.author && (
+        e.author.includes('metadata_extractor') || 
+        e.author.includes('rule_checker') || 
+        e.author.includes('query_optimizer') || 
+        e.author.includes('final_reporter')
+      )
+    );
+    
+    // Only throw error if we have no stage events AND no valid data
+    if (!hasStageEvents && !contentEvents.length) {
+      console.warn('No stage events or content found, might be incomplete');
       throw new Error('Optimization pipeline was interrupted. Please try again.');
     }
     
