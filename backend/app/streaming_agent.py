@@ -106,16 +106,27 @@ metadata_extractor = LlmAgent(
     The user message contains a SQL query. Extract it and call:
     fetch_bigquery_metadata(query="<the SQL query>")
     
-    The tool will return JSON with actual table statistics like:
-    {{"tables_found": 2, "total_size_gb": 2.18, "total_row_count": 388066, "tables": [...]}}
+    The tool will return detailed JSON. You must simplify it to this exact format:
+    {{
+        "tables_found": <number>,
+        "total_size_gb": <number>,
+        "total_row_count": <number>,
+        "tables": [
+            {{
+                "table_name": "<table path>",
+                "size_gb": <number>,
+                "row_count": <number>,
+                "column_names": ["col1", "col2", ...],
+                "partitioned": true/false,
+                "partition_field": "<field>" or null,
+                "clustered": true/false,
+                "cluster_fields": ["field1", "field2"] or []
+            }}
+        ]
+    }}
     
-    Your output must be ONLY the JSON returned by the tool, with no additional text, no separators, no markdown.
-    
-    Example:
-    Input: {{"query": "SELECT * FROM users"}}
-    You call: fetch_bigquery_metadata(query="SELECT * FROM users")
-    Tool returns: {{"tables_found": 1, "total_size_gb": 0.5, ...}}
-    Your output: {{"tables_found": 1, "total_size_gb": 0.5, ...}}
+    Extract ONLY the column names from each table's schema. Do not include full schema details.
+    Your output must be ONLY this simplified JSON, with no additional text, no separators, no markdown.
     
     Project: {PROJECT_ID}
     Dataset: {DATASET}
@@ -232,33 +243,33 @@ final_reporter = LlmAgent(
     instruction="""
     You are the Final Report Agent. Compile all results into a comprehensive report.
     
-    Your response must be ONLY valid JSON in this exact format:
-    {{
-        "executive_summary": {{
+    Your response must be ONLY valid JSON. Use this EXACT structure:
+    {
+        "executive_summary": {
             "original_complexity": "high",
             "optimized_complexity": "low",
             "cost_reduction": "95%",
             "performance_gain": "10x faster",
             "data_reduction": "1.2TB saved"
-        }},
-        "metadata_summary": {{
+        },
+        "metadata_summary": {
             "tables_analyzed": 2,
             "total_data_size": "1.25TB",
             "partitioned_tables": 2,
             "clustered_tables": 1
-        }},
-        "rules_summary": {{
+        },
+        "rules_summary": {
             "total_checked": 8,
             "violations_found": 3,
             "compliance_before": "62%",
             "compliance_after": "100%"
-        }},
-        "optimization_summary": {{
+        },
+        "optimization_summary": {
             "steps_taken": 3,
-            "final_query": "...",
+            "final_query": "SELECT ...",
             "estimated_cost_before": "$125",
             "estimated_cost_after": "$6.25"
-        }},
+        },
         "recommendations": [
             "Consider creating a materialized view for this query pattern",
             "Add clustering on frequently filtered columns",
@@ -269,10 +280,16 @@ final_reporter = LlmAgent(
             "Specify exact columns instead of SELECT *",
             "Use LIMIT during development"
         ]
-    }}
+    }
     
-    CRITICAL: Output ONLY the JSON. No markdown, no explanations, no text before or after.
-    Make the report actionable and easy to understand.
+    CRITICAL RULES:
+    1. Output ONLY the JSON structure above
+    2. NO markdown code blocks (no ```json or ```)
+    3. NO text before or after the JSON
+    4. Ensure ALL property names and string values are properly quoted
+    5. Use proper comma placement between properties
+    6. The "data_reduction" field must be a complete string like "1.2TB saved"
+    7. Make sure the JSON is complete and valid
     """,
     output_key="final_output",
     after_agent_callback=create_streaming_callback(

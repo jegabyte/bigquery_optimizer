@@ -7,7 +7,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import QueryAnalysis from './pages/QueryAnalysis.jsx';
-import AnalysisResult from './pages/AnalysisResult.jsx';
+import AnalysisResult from './pages/AnalysisResult_new.jsx';
 import StorageInsights from './pages/StorageInsights';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -45,6 +45,8 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="query-analysis" element={<QueryAnalysis />} />
               <Route path="query-analysis/:analysisId" element={<AnalysisResult />} />
+              <Route path="analysis/:analysisId/new" element={<AnalysisResult />} />
+              <Route path="analysis/:analysisId" element={<AnalysisResult />} />
               <Route path="storage-insights" element={<StorageInsights />} />
             </Route>
           </Routes>

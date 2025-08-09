@@ -117,23 +117,33 @@ export async function optimizeQueryWithADK(query, options = {}) {
             const data = JSON.parse(line.slice(6));
             events.push(data);
             
-            // Enhanced logging for debugging
+            // Enhanced logging for debugging - show COMPLETE data
             if (data.content?.parts?.[0]?.text) {
               const text = data.content.parts[0].text;
-              console.log(`Event from ${data.author}:`, text.substring(0, 100));
+              
+              // Log complete text without truncation
+              console.group(`📨 Event from: ${data.author}`);
+              console.log('Partial:', data.partial);
+              console.log('Text length:', text.length);
+              console.log('Full text:');
+              console.log(text); // Log COMPLETE text, no truncation
               
               // Check if this looks like metadata output
               if (text.includes('tables_found') || text.includes('total_size_gb') || text.includes('column_names')) {
-                console.log('METADATA DETECTED in event from', data.author, '- Full text:', text.substring(0, 500));
+                console.log('%c⚠️ METADATA DETECTED', 'color: green; font-weight: bold');
+                try {
+                  // Try to parse and pretty print JSON
+                  const jsonMatch = text.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    console.log('Parsed metadata:', parsed);
+                  }
+                } catch (e) {
+                  console.log('Could not parse as JSON');
+                }
               }
               
-              console.log('Full event structure:', {
-                author: data.author,
-                role: data.content?.role,
-                hasPartial: data.partial,
-                textLength: text.length,
-                firstChars: text.substring(0, 200)
-              });
+              console.groupEnd();
             }
             
             // Check if this is a complete stage output or accumulate partial data
@@ -148,92 +158,164 @@ export async function optimizeQueryWithADK(query, options = {}) {
               
               // For metadata_extractor, accumulate the text until we have complete JSON
               if (author === 'metadata_extractor') {
+                console.group(`🔍 Processing metadata_extractor event`);
+                console.log('Partial:', data.partial);
+                console.log('Text:', text);
+                
                 if (!window._stageAccumulator[author]) {
                   window._stageAccumulator[author] = '';
                 }
+                
+                // Accumulate all messages (both partial and final)
                 window._stageAccumulator[author] += text;
+                console.log('Accumulated so far:', window._stageAccumulator[author]);
                 
-                // Check if we have complete JSON now
-                const accumulated = window._stageAccumulator[author];
-                
-                // Try to find complete JSON in accumulated text
-                let jsonStr = null;
-                
-                // Look for complete JSON object (starts with { and ends with })
-                const jsonMatch = accumulated.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  jsonStr = jsonMatch[0];
+                // On final message, process the accumulated text
+                if (!data.partial) {
+                  console.log('%c📋 FINAL METADATA MESSAGE RECEIVED', 'color: blue; font-weight: bold');
+                  const accumulatedText = window._stageAccumulator[author];
                   
-                  // Verify it's complete by trying to parse
-                  try {
-                    const stageData = JSON.parse(jsonStr);
-                    
-                    // Check if this is metadata data
-                    if (stageData.tables_found !== undefined || stageData.tables !== undefined || 
-                        stageData.total_size_gb !== undefined || stageData.total_row_count !== undefined) {
-                      console.log('Calling onStageComplete for metadata:', stageData);
-                      if (options.onStageComplete) {
-                        options.onStageComplete('metadata', stageData);
-                      }
-                      // Clear accumulator after successful parse
-                      window._stageAccumulator[author] = '';
+                  // Try to find complete JSON in the accumulated text
+                  let jsonStr = null;
+                  
+                  // First try to remove markdown wrapper if present
+                  if (accumulatedText.includes('```json')) {
+                    const match = accumulatedText.match(/```json\s*([\s\S]*?)\s*```/);
+                    if (match) {
+                      jsonStr = match[1];
+                      console.log('Found JSON in markdown block');
                     }
-                  } catch (e) {
-                    // Not complete JSON yet, continue accumulating
                   }
+                  
+                  // Otherwise look for complete JSON object (starts with { and ends with })
+                  if (!jsonStr) {
+                    const jsonMatch = accumulatedText.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                      jsonStr = jsonMatch[0];
+                      console.log('Found raw JSON object');
+                    }
+                  }
+                  
+                  if (jsonStr) {
+                    console.log('Attempting to parse JSON:', jsonStr);
+                    // Verify it's complete by trying to parse
+                    try {
+                      const stageData = JSON.parse(jsonStr);
+                      console.log('%c✅ SUCCESSFULLY PARSED METADATA', 'color: green; font-weight: bold');
+                      console.log('Parsed data:', stageData);
+                      
+                      // Check if this is metadata data
+                      if (stageData.tables_found !== undefined || stageData.tables !== undefined || 
+                          stageData.total_size_gb !== undefined || stageData.total_row_count !== undefined) {
+                        console.log('Calling onStageComplete for metadata');
+                        if (options.onStageComplete) {
+                          options.onStageComplete('metadata', stageData);
+                        }
+                      }
+                    } catch (e) {
+                      console.error('❌ Failed to parse metadata JSON:', e);
+                      console.error('JSON string attempted:', jsonStr);
+                    }
+                  } else {
+                    console.warn('⚠️ No JSON found in accumulated text');
+                  }
+                  
+                  // Always clear accumulator after processing final message
+                  window._stageAccumulator[author] = '';
                 }
+                console.groupEnd();
               }
               
               // For other stages, use the original logic (they seem to work fine)
               if (!data.partial && author !== 'metadata_extractor') {
+                console.group(`🔍 Processing ${author} event (non-partial)`);
+                console.log('Full text:', text);
+                
                 try {
                   // Look for JSON in the text - try multiple patterns
                   let jsonStr = null;
                   let stageData = null;
                   
-                  // Pattern 1: JSON in code blocks
-                  const codeBlockMatch = text.match(/```json\n([\s\S]*?)\n```/);
-                  if (codeBlockMatch) {
-                    jsonStr = codeBlockMatch[1];
-                  }
-                  
-                  // Pattern 2: Raw JSON object
-                  if (!jsonStr) {
-                    const jsonMatch = text.match(/\{[\s\S]*?\}/);
-                    if (jsonMatch) {
-                      jsonStr = jsonMatch[0];
+                  // Special handling for final_reporter - it often sends raw JSON
+                  if (author === 'final_reporter') {
+                    console.log('Processing final_reporter');
+                    // First check if it starts with { (raw JSON)
+                    if (text.trim().startsWith('{')) {
+                      // Find the last closing brace
+                      const lastBraceIndex = text.lastIndexOf('}');
+                      if (lastBraceIndex > 0) {
+                        jsonStr = text.substring(0, lastBraceIndex + 1);
+                        console.log('Found raw JSON in final_reporter');
+                      }
+                    } else if (text.includes('```json')) {
+                      // Has markdown wrapper
+                      const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+                      if (match) {
+                        jsonStr = match[1];
+                        console.log('Found JSON in markdown block');
+                      }
+                    }
+                  } else {
+                    // Pattern 1: JSON in code blocks
+                    const codeBlockMatch = text.match(/```json\n([\s\S]*?)\n```/);
+                    if (codeBlockMatch) {
+                      jsonStr = codeBlockMatch[1];
+                      console.log('Found JSON in code block');
+                    }
+                    
+                    // Pattern 2: Raw JSON object
+                    if (!jsonStr) {
+                      const jsonMatch = text.match(/\{[\s\S]*?\}/);
+                      if (jsonMatch) {
+                        jsonStr = jsonMatch[0];
+                        console.log('Found raw JSON object');
+                      }
                     }
                   }
                   
                   // Try to parse the JSON
                   if (jsonStr) {
+                    console.log('Attempting to parse JSON string:', jsonStr);
                     try {
-                      stageData = JSON.parse(jsonStr);
-                      console.log(`Parsed stage data from ${author}:`, stageData);
+                      // Fix common JSON issues before parsing
+                      // Fix double curly braces from malformed agent output
+                      let fixedJson = jsonStr.replace(/\{\{/g, '{').replace(/\}\}/g, '}');
+                      // Replace double closing braces with single
+                      fixedJson = fixedJson.replace(/\}\},/g, '},');
+                      // Ensure last closing is single brace
+                      fixedJson = fixedJson.replace(/\}\}\}$/, '}}');
+                      
+                      stageData = JSON.parse(fixedJson);
+                      console.log(`%c✅ SUCCESSFULLY PARSED ${author} DATA`, 'color: green; font-weight: bold');
+                      console.log('Parsed data:', stageData);
                     } catch (e) {
-                      console.warn('Failed to parse JSON from text:', e, 'Text:', jsonStr.substring(0, 200));
+                      console.error(`❌ Failed to parse JSON from ${author}:`, e);
+                      console.error('JSON string attempted:', jsonStr);
                     }
+                  } else {
+                    console.warn('⚠️ No JSON found in text');
                   }
                   
                   // Call onStageComplete if this is a complete stage and we have stageData
                   if (stageData && options.onStageComplete) {
                     if ((author === 'rule_checker' || author === 'rule-checker') && 
                                (stageData.rules_checked !== undefined || stageData.violations !== undefined)) {
-                      console.log('Calling onStageComplete for rules:', stageData);
+                      console.log('%c📊 Calling onStageComplete for RULES', 'color: blue; font-weight: bold');
                       options.onStageComplete('rules', stageData);
                     } else if ((author === 'query_optimizer' || author === 'query-optimizer') && 
                                (stageData.total_optimizations !== undefined || stageData.steps !== undefined)) {
-                      console.log('Calling onStageComplete for optimization:', stageData);
+                      console.log('%c📊 Calling onStageComplete for OPTIMIZATION', 'color: blue; font-weight: bold');
                       options.onStageComplete('optimization', stageData);
                     } else if ((author === 'final_reporter' || author === 'final-reporter') && 
                                (stageData.executive_summary !== undefined || stageData.optimization_summary !== undefined)) {
-                      console.log('Calling onStageComplete for report:', stageData);
+                      console.log('%c📊 Calling onStageComplete for REPORT', 'color: blue; font-weight: bold');
                       options.onStageComplete('report', stageData);
                     }
                   }
                 } catch (e) {
-                  console.warn('Failed to parse stage JSON:', e);
+                  console.error('Outer error in stage processing:', e);
                 }
+                console.groupEnd();
               }
             }
             
@@ -280,12 +362,33 @@ export async function optimizeQueryWithADK(query, options = {}) {
       }
     }
     
-    // Log events for debugging
+    // Log comprehensive summary for debugging
+    console.group('%c📈 STREAMING COMPLETE - SUMMARY', 'background: #222; color: #bada55; font-size: 14px; font-weight: bold');
     console.log('Total events received:', events.length);
     
     // Find events with content
     const contentEvents = events.filter(e => e.content?.parts?.[0]?.text || e.data?.output);
     console.log('Events with content:', contentEvents.length);
+    
+    // Log events by author
+    const eventsByAuthor = {};
+    events.forEach(e => {
+      const author = e.author || 'unknown';
+      if (!eventsByAuthor[author]) eventsByAuthor[author] = [];
+      eventsByAuthor[author].push(e);
+    });
+    
+    console.log('Events by author:');
+    Object.keys(eventsByAuthor).forEach(author => {
+      console.log(`  ${author}: ${eventsByAuthor[author].length} events`);
+    });
+    
+    // Check what stage data we accumulated
+    if (window._stageAccumulator) {
+      console.log('Stage accumulator state:', window._stageAccumulator);
+    }
+    
+    console.groupEnd();
     
     // Try to parse from the new event structure
     if (contentEvents.length > 0) {
@@ -318,10 +421,31 @@ export async function optimizeQueryWithADK(query, options = {}) {
       return parseADKResponse(lastDataEvent.data, events);
     }
     
+    // Check if we only got orchestrator messages (incomplete response)
+    const orchestratorOnly = events.every(e => e.author === 'streaming_orchestrator');
+    if (orchestratorOnly) {
+      throw new Error('Optimization pipeline was interrupted. Please try again.');
+    }
+    
     throw new Error('No valid response received from ADK');
     
   } catch (error) {
     console.error('ADK optimization error:', error);
+    
+    // Check for specific error types
+    if (error.message.includes('Optimization pipeline was interrupted')) {
+      // Return a more informative error for UI
+      return {
+        error: true,
+        errorType: 'pipeline_interrupted',
+        message: 'The optimization process was interrupted',
+        suggestions: [
+          'The backend service may be experiencing issues',
+          'Please try running the analysis again',
+          'If the problem persists, check the backend logs'
+        ]
+      };
+    }
     
     // Fallback to mock service if ADK is not available
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
@@ -330,7 +454,17 @@ export async function optimizeQueryWithADK(query, options = {}) {
       return await mockOptimizationService.optimizeQuery(query);
     }
     
-    throw error;
+    // For other errors, return a structured error response
+    return {
+      error: true,
+      errorType: 'unknown_error',
+      message: error.message || 'An unexpected error occurred',
+      suggestions: [
+        'Check if the backend server is running',
+        'Verify your network connection',
+        'Check the browser console for more details'
+      ]
+    };
   }
 }
 
@@ -342,6 +476,11 @@ function parseADKResponse(output, events = []) {
   const structuredData = extractStructuredData(events);
   if (structuredData) {
     return structuredData;
+  }
+  
+  // Handle null/undefined output
+  if (!output) {
+    return null;
   }
   
   // If output is already in the expected format

@@ -37,6 +37,13 @@ const AnalysisResult = () => {
   const [analysisStatus, setAnalysisStatus] = useState('idle');
   const [backendStatus, setBackendStatus] = useState(null);
 
+  // Helper to get stage data from either stageData or result.metadata.stages
+  const getStageData = (stageName) => {
+    if (stageData[stageName]) return stageData[stageName];
+    if (result?.metadata?.stages?.[stageName]) return result.metadata.stages[stageName];
+    return null;
+  };
+
   // Load existing analysis
   useEffect(() => {
     if (!isNew && analysisId) {
@@ -60,9 +67,11 @@ const AnalysisResult = () => {
         });
         setResult(analysisData.result);
         
-        // Load stage data
+        // Load stage data - check both stageData and result.metadata.stages
         if (analysisData.stageData) {
           setStageData(analysisData.stageData);
+        } else if (analysisData.result?.metadata?.stages) {
+          setStageData(analysisData.result.metadata.stages);
         }
         
         setOriginalQuery(analysisData.query);
@@ -142,10 +151,11 @@ const AnalysisResult = () => {
     setStageData({});
     setBackendStatus(null);
 
+    let optimizationResult = null; // Declare at the beginning of try block
+
     try {
       // Test ADK connection first
       const adkAvailable = await testADKConnection();
-      let optimizationResult = null;
       
       if (adkAvailable) {
         console.log('Using ADK backend for optimization');
@@ -323,9 +333,11 @@ const AnalysisResult = () => {
       
       toast.success('Query analyzed successfully!');
       
-      // Keep showing progress to display all completed stages
-      // Don't hide it immediately - let user see the completed stages
-      setCurrentStep(-1); // Reset current step but keep showProgress true
+      // Hide progress after a short delay
+      setTimeout(() => {
+        setShowProgress(false);
+        setCurrentStep(-1);
+      }, 1000);
       
     } catch (error) {
       setAnalysisStatus('failed');
@@ -367,9 +379,8 @@ const AnalysisResult = () => {
   };
 
   const renderOptimizationImpact = () => {
-    if (!result.metadata?.stages?.report) return null;
-    
-    const report = result.metadata.stages.report;
+    const report = getStageData('report');
+    if (!report) return null;
     const summary = report.executive_summary;
     
     return (
@@ -443,7 +454,7 @@ const AnalysisResult = () => {
         </div>
       </div>
 
-      {/* Edit Mode - Show input first during analysis */}
+      {/* Edit Mode - Show first during analysis */}
       {mode === 'edit' && (
         <div className="card space-y-4 mb-4">
           <div>
@@ -463,9 +474,6 @@ const AnalysisResult = () => {
                   lineNumbers: 'on',
                   scrollBeyondLastLine: false,
                   automaticLayout: true,
-                  wordWrap: 'on',
-                  formatOnPaste: true,
-                  formatOnType: true,
                 }}
               />
             </div>
@@ -523,7 +531,7 @@ const AnalysisResult = () => {
         </div>
       )}
 
-      {/* Original Query Display - Show in view mode with better formatting */}
+      {/* Original Query Display - Show in view mode */}
       {mode === 'view' && originalQuery && (
         <div className="card mb-4">
           <div className="flex justify-between items-center mb-3">
@@ -550,18 +558,16 @@ const AnalysisResult = () => {
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
                 wordWrap: 'on',
-                renderWhitespace: 'none',
-                folding: false,
-                lineDecorationsWidth: 0,
-                lineNumbersMinChars: 3,
+                formatOnPaste: true,
+                formatOnType: true
               }}
             />
           </div>
         </div>
       )}
 
-      {/* Optimization Stages Display */}
-      {showProgress && (
+      {/* Optimization Stages Display - Show during and after analysis */}
+      {(showProgress || (mode === 'view' && result && (Object.keys(stageData).length > 0 || result.metadata?.stages))) && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -572,8 +578,8 @@ const AnalysisResult = () => {
             {/* Stage 1: Metadata Extraction */}
             <div>
               <button
-                onClick={() => stageData.metadata && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
-                disabled={!stageData.metadata}
+                onClick={() => getStageData('metadata') && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
+                disabled={!getStageData('metadata')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
                   stageData.metadata 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
@@ -584,34 +590,34 @@ const AnalysisResult = () => {
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {stageData.metadata ? (
+                    {getStageData('metadata') ? (
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 0 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
-                    <span className={`font-medium ${!stageData.metadata && currentStep !== 0 ? 'text-gray-400' : ''}`}>
+                    <span className={`font-medium ${!getStageData('metadata') && currentStep !== 0 ? 'text-gray-400' : ''}`}>
                       Metadata Extraction
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {stageData.metadata 
-                      ? `${stageData.metadata.tables_found} table(s), ${stageData.metadata.total_size_gb}GB`
+                    {getStageData('metadata') 
+                      ? `${getStageData('metadata').tables_found} table(s), ${getStageData('metadata').total_size_gb}GB`
                       : currentStep === 0 
                         ? 'Processing...'
                         : 'Waiting...'}
                   </span>
                 </div>
               </button>
-              {selectedStage === 'metadata' && stageData.metadata && (
+              {selectedStage === 'metadata' && getStageData('metadata') && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
                 >
                   <div className="space-y-2">
-                    {stageData.metadata.tables && stageData.metadata.tables.map((table, idx) => (
+                    {getStageData('metadata').tables && getStageData('metadata').tables.map((table, idx) => (
                       <div key={idx} className="border-l-2 border-blue-400 pl-3">
                         <div className="font-medium text-sm">{table.table_name}</div>
                         <div className="text-xs text-gray-600">
@@ -632,10 +638,10 @@ const AnalysisResult = () => {
             {/* Stage 2: Rule Analysis */}
             <div>
               <button
-                onClick={() => stageData.rules && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
-                disabled={!stageData.rules}
+                onClick={() => getStageData('rules') && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
+                disabled={!getStageData('rules')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  stageData.rules 
+                  getStageData('rules') 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
                     : currentStep === 1 
                       ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
@@ -644,36 +650,39 @@ const AnalysisResult = () => {
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {stageData.rules ? (
+                    {getStageData('rules') ? (
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 1 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
-                    <span className={`font-medium ${!stageData.rules && currentStep !== 1 ? 'text-gray-400' : ''}`}>
-                      Anti-Pattern Analysis
+                    <span className={`font-medium ${!getStageData('rules') && currentStep !== 1 ? 'text-gray-400' : ''}`}>
+                      Rule Analysis
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {stageData.rules 
-                      ? `${stageData.rules.violations_found} violations, ${stageData.rules.compliance_score}% compliant`
+                    {getStageData('rules') 
+                      ? `${getStageData('rules').violations_found} issue(s) found`
                       : currentStep === 1 
                         ? 'Processing...'
                         : 'Waiting...'}
                   </span>
                 </div>
               </button>
-              {selectedStage === 'rules' && stageData.rules && (
+              {selectedStage === 'rules' && getStageData('rules') && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   className="ml-7 mt-2 p-3 bg-white rounded-lg border border-yellow-200"
                 >
                   <div className="space-y-2">
-                    {stageData.rules.violations && stageData.rules.violations.map((violation, idx) => (
-                      <div key={idx} className="text-xs">
-                        <span className="font-medium">{violation.rule_id}:</span> {violation.fix}
+                    <div className="text-sm font-medium">Compliance Score: {getStageData('rules').compliance_score}%</div>
+                    {getStageData('rules').violations && getStageData('rules').violations.map((violation, idx) => (
+                      <div key={idx} className="border-l-2 border-yellow-400 pl-3">
+                        <div className="font-medium text-sm">{violation.rule_id}</div>
+                        <div className="text-xs text-gray-600">{violation.fix}</div>
+                        <div className="text-xs text-red-600">Impact: {violation.impact}</div>
                       </div>
                     ))}
                   </div>
@@ -684,10 +693,10 @@ const AnalysisResult = () => {
             {/* Stage 3: Query Optimization */}
             <div>
               <button
-                onClick={() => stageData.optimization && setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
-                disabled={!stageData.optimization}
+                onClick={() => getStageData('optimization') && setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
+                disabled={!getStageData('optimization')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  stageData.optimization 
+                  getStageData('optimization') 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
                     : currentStep === 2 
                       ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
@@ -696,38 +705,49 @@ const AnalysisResult = () => {
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {stageData.optimization ? (
+                    {getStageData('optimization') ? (
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 2 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
-                    <span className={`font-medium ${!stageData.optimization && currentStep !== 2 ? 'text-gray-400' : ''}`}>
+                    <span className={`font-medium ${!getStageData('optimization') && currentStep !== 2 ? 'text-gray-400' : ''}`}>
                       Query Optimization
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {stageData.optimization 
-                      ? `${stageData.optimization.total_optimizations} steps, ${stageData.optimization.total_improvement}`
+                    {getStageData('optimization') 
+                      ? `${getStageData('optimization').total_optimizations} optimization(s) applied`
                       : currentStep === 2 
                         ? 'Processing...'
                         : 'Waiting...'}
                   </span>
                 </div>
               </button>
-              {selectedStage === 'optimization' && stageData.optimization && (
+              {selectedStage === 'optimization' && getStageData('optimization') && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-blue-200"
                 >
                   <div className="space-y-2">
-                    {stageData.optimization.steps && stageData.optimization.steps.map((step, idx) => (
-                      <div key={idx} className="text-xs">
-                        <span className="font-medium">Step {step.step}:</span> {step.optimization} - {step.improvement}
+                    {getStageData('optimization').steps && getStageData('optimization').steps.map((step, idx) => (
+                      <div key={idx} className="border-l-2 border-blue-400 pl-3">
+                        <div className="font-medium text-sm">Step {step.step}: {step.optimization}</div>
+                        <div className="text-xs text-green-600">{step.improvement}</div>
+                        {step.bytes_saved && (
+                          <div className="text-xs text-gray-500">Saved: {step.bytes_saved}</div>
+                        )}
                       </div>
                     ))}
+                    {getStageData('optimization').total_improvement && (
+                      <div className="mt-2 pt-2 border-t">
+                        <div className="text-sm font-medium text-green-700">
+                          Total: {getStageData('optimization').total_improvement}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -736,10 +756,10 @@ const AnalysisResult = () => {
             {/* Stage 4: Final Report */}
             <div>
               <button
-                onClick={() => stageData.report && setSelectedStage(selectedStage === 'report' ? null : 'report')}
-                disabled={!stageData.report}
+                onClick={() => getStageData('report') && setSelectedStage(selectedStage === 'report' ? null : 'report')}
+                disabled={!getStageData('report')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  stageData.report 
+                  getStageData('report') 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
                     : currentStep === 3 
                       ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
@@ -748,36 +768,53 @@ const AnalysisResult = () => {
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {stageData.report ? (
+                    {getStageData('report') ? (
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 3 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
-                    <span className={`font-medium ${!stageData.report && currentStep !== 3 ? 'text-gray-400' : ''}`}>
+                    <span className={`font-medium ${!getStageData('report') && currentStep !== 3 ? 'text-gray-400' : ''}`}>
                       Final Report
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {stageData.report 
-                      ? `${stageData.report.executive_summary?.cost_reduction} cost reduction`
+                    {getStageData('report') 
+                      ? 'Complete'
                       : currentStep === 3 
                         ? 'Processing...'
                         : 'Waiting...'}
                   </span>
                 </div>
               </button>
-              {selectedStage === 'report' && stageData.report && (
+              {selectedStage === 'report' && getStageData('report') && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-purple-200"
+                  className="ml-7 mt-2 p-3 bg-white rounded-lg border border-green-200"
                 >
-                  <div className="text-xs space-y-1">
-                    <div><span className="font-medium">Cost:</span> {stageData.report.optimization_summary?.estimated_cost_before} → {stageData.report.optimization_summary?.estimated_cost_after}</div>
-                    <div><span className="font-medium">Performance:</span> {stageData.report.executive_summary?.performance_gain}</div>
-                    <div><span className="font-medium">Data Saved:</span> {stageData.report.executive_summary?.data_reduction}</div>
+                  <div className="space-y-3">
+                    {getStageData('report').executive_summary && (
+                      <div>
+                        <div className="text-sm font-medium mb-1">Executive Summary</div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div>Cost: {getStageData('report').executive_summary.cost_reduction}</div>
+                          <div>Speed: {getStageData('report').executive_summary.performance_gain}</div>
+                          <div>Data: {getStageData('report').executive_summary.data_reduction}</div>
+                        </div>
+                      </div>
+                    )}
+                    {getStageData('report').recommendations && (
+                      <div>
+                        <div className="text-sm font-medium mb-1">Recommendations</div>
+                        <ul className="text-xs text-gray-600 space-y-1">
+                          {getStageData('report').recommendations.slice(0, 3).map((rec, idx) => (
+                            <li key={idx}>• {rec}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -823,104 +860,41 @@ const AnalysisResult = () => {
       {/* Optimized Query Output */}
       {mode === 'view' && result && result.optimizedQuery && !result.error && (
         <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">Optimized Query</h3>
-          <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-            <pre className="text-sm text-gray-700 overflow-x-auto">
-              <code>{result.optimizedQuery}</code>
-            </pre>
-          </div>
-          
-          <div className="mt-4 flex justify-end">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold text-gray-900">Optimized Query</h3>
             <button
-              onClick={() => {
-                navigator.clipboard.writeText(result.optimizedQuery);
-                toast.success('Optimized query copied to clipboard!');
-              }}
+              onClick={() => copyToClipboard(result.optimizedQuery)}
               className="btn-secondary btn-sm"
+              title="Copy to clipboard"
             >
-              <FiCopy className="h-4 w-4 mr-1" />
-              Copy Optimized Query
+              <FiCopy className="h-4 w-4" />
             </button>
+          </div>
+          <div className="border rounded-lg overflow-hidden bg-green-50">
+            <MonacoEditor
+              height="200px"
+              defaultLanguage="sql"
+              value={result.optimizedQuery}
+              theme="vs-light"
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                wordWrap: 'on',
+                formatOnPaste: true,
+                formatOnType: true
+              }}
+            />
+          </div>
+          <div className="mt-2 flex justify-end">
+            <span className="text-sm text-green-600 font-medium">✓ Optimized for better performance</span>
           </div>
         </div>
       )}
 
-      {/* Edit Mode */}
-      {mode === 'edit' && (
-        <div className="card space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Enter your BigQuery SQL
-            </label>
-            <div className="border rounded-lg overflow-hidden">
-              <MonacoEditor
-                height="300px"
-                defaultLanguage="sql"
-                value={query}
-                onChange={setQuery}
-                theme="vs-light"
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={options.rewrite}
-                onChange={(e) => setOptions({ ...options, rewrite: e.target.checked })}
-                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-sm text-gray-700">Rewrite query</span>
-            </label>
-            
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={options.validate}
-                onChange={(e) => setOptions({ ...options, validate: e.target.checked })}
-                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-sm text-gray-700">Validate optimization</span>
-            </label>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleAnalyze}
-              disabled={loading || !query.trim()}
-              className="btn-primary"
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <FiPlay className="h-4 w-4 mr-1" />
-                  Analyze Query
-                </>
-              )}
-            </button>
-            {!isNew && originalQuery && (
-              <button onClick={handleCancelEdit} className="btn-secondary">
-                Cancel
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Error State */}
       {mode === 'view' && result && result.error && (
