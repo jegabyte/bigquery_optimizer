@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-python-jose[cryptography]
-python-multipart
-pyyaml
-sqlparse
-python-dotenv

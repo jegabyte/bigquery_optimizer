@@ -1,571 +1,378 @@
 #!/bin/bash
 
-###################################################################################
-# BigQuery Optimizer - Cloud Run Deployment Script
-###################################################################################
-# This script deploys the BigQuery Optimizer to Google Cloud Run
-# It handles both frontend and backend deployments
-#
-# Prerequisites:
-# - Google Cloud SDK installed and configured
-# - Docker installed (for frontend build)
-# - Python 3.10+ installed
-# - gcloud authenticated (gcloud auth login)
-# - Project permissions for Cloud Run, Artifact Registry, and related services
-###################################################################################
+# ================================================================
+# BigQuery Optimizer - Deployment & Management Script
+# ================================================================
+# Usage:
+#   ./deploy.sh              # Show help
+#   ./deploy.sh deploy       # Deploy both frontend and backend
+#   ./deploy.sh local        # Start local development
+#   ./deploy.sh destroy      # Destroy all services
+#   ./deploy.sh status       # Check deployment status
+# ================================================================
 
-set -e  # Exit on error
+set -e
 
-# Color codes for output
+# Configuration
+PROJECT_ID="aiva-e74f3"
+REGION="us-central1"
+BACKEND_SERVICE="bigquery-optimizer-backend"
+FRONTEND_SERVICE="bigquery-optimizer-frontend"
+
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration Variables - Modify these as needed
-PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-}"
-REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
-SERVICE_NAME_BACKEND="${SERVICE_NAME_BACKEND:-bigquery-optimizer-backend}"
-SERVICE_NAME_FRONTEND="${SERVICE_NAME_FRONTEND:-bigquery-optimizer-frontend}"
-APP_NAME="${APP_NAME:-bigquery-optimizer}"
-ARTIFACT_REGISTRY_REPO="${ARTIFACT_REGISTRY_REPO:-bigquery-optimizer}"
-ENABLE_UI="${ENABLE_UI:-true}"
-ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-false}"
-USE_CLOUD_BUILD=false  # Will be set by check_prerequisites
-
-# Resource configuration
-CPU="${CPU:-2}"
-MEMORY="${MEMORY:-4Gi}"
-MAX_INSTANCES="${MAX_INSTANCES:-10}"
-MIN_INSTANCES="${MIN_INSTANCES:-0}"
-TIMEOUT="${TIMEOUT:-600}"
-
-# Print header
-echo "=========================================="
-echo "BigQuery Optimizer - Cloud Run Deployment"
-echo "=========================================="
-echo ""
-
-# Function to print colored messages
-print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+# Functions
+print_header() {
+    echo -e "${BLUE}================================================================${NC}"
+    echo -e "${BLUE}$1${NC}"
+    echo -e "${BLUE}================================================================${NC}"
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}✅ $1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}❌ $1${NC}"
 }
 
-# Function to check prerequisites
-check_prerequisites() {
-    print_info "Checking prerequisites..."
-    
-    # Check gcloud
-    if ! command -v gcloud &> /dev/null; then
-        print_error "gcloud CLI not found. Please install Google Cloud SDK."
-        exit 1
-    fi
-    
-    # Check Python
-    if ! command -v python3 &> /dev/null; then
-        print_error "Python 3 not found. Please install Python 3.10+."
-        exit 1
-    fi
-    
-    # Docker is optional - we can use Cloud Build
-    if ! command -v docker &> /dev/null; then
-        print_warning "Docker not found locally. Will use Cloud Build for container builds."
-        export USE_CLOUD_BUILD=true
-    else
-        # Check if Docker daemon is running
-        if ! docker ps &> /dev/null; then
-            print_warning "Docker daemon not running. Will use Cloud Build for container builds."
-            export USE_CLOUD_BUILD=true
-        else
-            export USE_CLOUD_BUILD=false
-        fi
-    fi
-    
-    print_success "Prerequisites check passed"
+print_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
 }
 
-# Function to validate and set project configuration
-setup_project() {
-    print_info "Setting up project configuration..."
-    
-    # Get or prompt for project ID
-    if [ -z "$PROJECT_ID" ]; then
-        read -p "Enter your Google Cloud Project ID: " PROJECT_ID
-    fi
-    
-    # Set the project
-    gcloud config set project $PROJECT_ID
-    
-    # Enable required APIs
-    print_info "Enabling required Google Cloud APIs..."
-    gcloud services enable \
-        run.googleapis.com \
-        artifactregistry.googleapis.com \
-        cloudbuild.googleapis.com \
-        bigquery.googleapis.com \
-        aiplatform.googleapis.com \
-        --quiet
-    
-    print_success "Project configuration complete: $PROJECT_ID"
-}
-
-# Function to create Artifact Registry repository
-setup_artifact_registry() {
-    print_info "Setting up Artifact Registry..."
-    
-    # Check if repository exists
-    if gcloud artifacts repositories describe $ARTIFACT_REGISTRY_REPO \
-        --location=$REGION &> /dev/null; then
-        print_info "Artifact Registry repository already exists"
-    else
-        print_info "Creating Artifact Registry repository..."
-        gcloud artifacts repositories create $ARTIFACT_REGISTRY_REPO \
-            --repository-format=docker \
-            --location=$REGION \
-            --description="BigQuery Optimizer Docker images"
-    fi
-    
-    # Configure Docker authentication
-    print_info "Configuring Docker authentication..."
-    gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
-    
-    print_success "Artifact Registry setup complete"
-}
-
-# Function to build and deploy backend
+# Deploy Backend Function
 deploy_backend() {
-    print_info "Deploying backend service..."
+    print_header "Deploying Backend Service with ADK"
     
-    cd backend
+    cd backend/app
     
-    # Create a temporary main.py for Cloud Run deployment
-    cat > main.py << 'EOF'
-"""
-Cloud Run entry point for BigQuery Optimizer Backend
-"""
-import os
-import sys
-
-# Set environment variables
-os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", "")
-os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
-
-# Import and run the ADK server
-from google.adk.cli.fast_api import serve_app
-
-# Import our agent
-from app.streaming_agent import root_agent
-
-if __name__ == "__main__":
-    # Start the ADK server
-    import uvicorn
-    from google.adk.cli.fast_api import create_app
-    
-    app = create_app(
-        agent=root_agent,
-        app_name="bigquery-optimizer",
-        with_ui=True  # Enable the ADK UI
-    )
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        log_level="info"
-    )
-EOF
-    
-    # Create Dockerfile for backend
-    cat > Dockerfile << 'EOF'
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY app/ ./app/
-COPY main.py .
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
-
-EXPOSE 8080
-
-CMD ["python", "main.py"]
-EOF
-    
-    # Build Docker image
-    IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${SERVICE_NAME_BACKEND}"
-    
-    if [ "$USE_CLOUD_BUILD" = "true" ]; then
-        print_info "Building Docker image using Cloud Build..."
-        gcloud builds submit \
-            --tag $IMAGE_URL \
-            --timeout=20m \
-            --machine-type=n1-highcpu-8 \
-            .
+    print_info "Checking for virtual environment..."
+    if [ -d "../.venv" ]; then
+        source ../.venv/bin/activate
     else
-        print_info "Building Docker image locally..."
-        docker build -t $IMAGE_URL .
-        
-        print_info "Pushing Docker image to Artifact Registry..."
-        docker push $IMAGE_URL
+        print_error "Virtual environment not found. Please run 'python -m venv .venv' in backend directory"
+        exit 1
     fi
     
-    # Deploy to Cloud Run
-    print_info "Deploying backend to Cloud Run..."
-    
-    # Deploy using gcloud run deploy
-    gcloud run deploy $SERVICE_NAME_BACKEND \
-        --image=$IMAGE_URL \
+    print_info "Deploying with ADK..."
+    adk deploy cloud_run \
+        --project=$PROJECT_ID \
         --region=$REGION \
-        --platform=managed \
-        --cpu=$CPU \
-        --memory=$MEMORY \
-        --max-instances=$MAX_INSTANCES \
-        --min-instances=$MIN_INSTANCES \
-        --timeout=$TIMEOUT \
-        --port=8080 \
-        --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,GOOGLE_GENAI_USE_VERTEXAI=True" \
-        --quiet
+        --service_name=$BACKEND_SERVICE \
+        --app_name=. \
+        --with_ui \
+        --port=8000 \
+        --allow_origins="*" \
+        .
     
-    
-    # Handle authentication
-    if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then
-        print_info "Allowing unauthenticated access..."
-        gcloud run services add-iam-policy-binding $SERVICE_NAME_BACKEND \
-            --region=$REGION \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet
-    fi
-    
-    # Get service URL
-    BACKEND_URL=$(gcloud run services describe $SERVICE_NAME_BACKEND \
+    BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE \
         --region=$REGION \
+        --project=$PROJECT_ID \
         --format='value(status.url)')
     
-    print_success "Backend deployed successfully: $BACKEND_URL"
-    
-    # Clean up temporary files
-    rm -f main.py Dockerfile
-    
-    cd ..
+    print_success "Backend deployed at: $BACKEND_URL"
+    print_info "ADK UI available at: $BACKEND_URL/app/"
+    print_info "API Docs available at: $BACKEND_URL/docs"
+    cd ../..
 }
 
-# Function to build and deploy frontend
+# Deploy Frontend Function
 deploy_frontend() {
-    print_info "Deploying frontend service..."
+    print_header "Deploying Frontend Service"
     
     cd frontend
     
     # Get backend URL
-    BACKEND_URL=$(gcloud run services describe $SERVICE_NAME_BACKEND \
+    BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE \
         --region=$REGION \
-        --format='value(status.url)')
+        --project=$PROJECT_ID \
+        --format='value(status.url)' 2>/dev/null || echo "")
     
-    # Update frontend configuration to use backend URL
-    print_info "Configuring frontend to use backend URL: $BACKEND_URL"
-    
-    # Create .env.production file
-    cat > .env.production << EOF
-VITE_API_URL=$BACKEND_URL
-VITE_ADK_API_URL=$BACKEND_URL
-EOF
-    
-    # Build frontend
-    print_info "Building frontend..."
-    npm install
-    npm run build
-    
-    # Create nginx configuration
-    cat > nginx.conf << 'EOF'
-server {
-    listen 8080;
-    server_name _;
-    
-    root /usr/share/nginx/html;
-    index index.html;
-    
-    # Handle client-side routing
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-    
-    # Proxy API requests to backend
-    location /api {
-        proxy_pass $BACKEND_URL;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-}
-EOF
-    
-    # Update Dockerfile to use environment variable
-    cat > Dockerfile << EOF
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-ARG BACKEND_URL
-ENV VITE_API_URL=\$BACKEND_URL
-ENV VITE_ADK_API_URL=\$BACKEND_URL
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Use environment variable in nginx config
-RUN echo "env BACKEND_URL;" >> /etc/nginx/nginx.conf
-CMD ["nginx", "-g", "daemon off;"]
-EXPOSE 8080
-EOF
-    
-    # Build Docker image
-    IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${SERVICE_NAME_FRONTEND}"
-    
-    if [ "$USE_CLOUD_BUILD" = "true" ]; then
-        print_info "Building Docker image using Cloud Build..."
-        gcloud builds submit \
-            --tag $IMAGE_URL \
-            --timeout=20m \
-            --machine-type=n1-highcpu-8 \
-            --build-arg=BACKEND_URL=$BACKEND_URL \
-            .
-    else
-        print_info "Building Docker image locally..."
-        docker build --build-arg BACKEND_URL=$BACKEND_URL -t $IMAGE_URL .
-        
-        print_info "Pushing Docker image to Artifact Registry..."
-        docker push $IMAGE_URL
+    if [ -z "$BACKEND_URL" ]; then
+        print_error "Backend service not found. Deploy backend first!"
+        exit 1
     fi
     
-    # Deploy to Cloud Run
-    print_info "Deploying frontend to Cloud Run..."
-    gcloud run deploy $SERVICE_NAME_FRONTEND \
-        --image=$IMAGE_URL \
+    print_info "Backend URL: $BACKEND_URL"
+    print_info "Building and deploying frontend..."
+    
+    # Update Dockerfile with correct backend URL
+    sed -i.bak "s|ENV VITE_API_URL=.*|ENV VITE_API_URL=$BACKEND_URL|" Dockerfile
+    rm -f Dockerfile.bak
+    
+    gcloud run deploy $FRONTEND_SERVICE \
+        --source . \
         --region=$REGION \
-        --platform=managed \
-        --cpu=$CPU \
-        --memory=$MEMORY \
-        --max-instances=$MAX_INSTANCES \
-        --min-instances=$MIN_INSTANCES \
+        --allow-unauthenticated \
         --port=8080 \
-        --set-env-vars="BACKEND_URL=$BACKEND_URL" \
+        --memory=256Mi \
+        --project=$PROJECT_ID \
+        --set-env-vars="VITE_API_URL=$BACKEND_URL" \
         --quiet
     
-    # Handle authentication
-    if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then
-        print_info "Allowing unauthenticated access..."
-        gcloud run services add-iam-policy-binding $SERVICE_NAME_FRONTEND \
-            --region=$REGION \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet
-    fi
-    
-    # Get service URL
-    FRONTEND_URL=$(gcloud run services describe $SERVICE_NAME_FRONTEND \
+    FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE \
         --region=$REGION \
+        --project=$PROJECT_ID \
         --format='value(status.url)')
     
-    print_success "Frontend deployed successfully: $FRONTEND_URL"
-    
-    # Clean up temporary files
-    rm -f nginx.conf .env.production
-    
+    print_success "Frontend deployed at: $FRONTEND_URL"
     cd ..
 }
 
-# Function to create service account and set permissions
-setup_permissions() {
-    print_info "Setting up service account and permissions..."
+# Destroy Services Function
+destroy_services() {
+    print_header "Destroying Services"
     
-    SERVICE_ACCOUNT="${APP_NAME}-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+    print_warning "This will delete both frontend and backend services."
+    read -p "Are you sure? (y/N): " -n 1 -r
+    echo
     
-    # Create service account if it doesn't exist
-    if ! gcloud iam service-accounts describe $SERVICE_ACCOUNT &> /dev/null; then
-        print_info "Creating service account..."
-        gcloud iam service-accounts create ${APP_NAME}-sa \
-            --display-name="BigQuery Optimizer Service Account"
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_info "Deleting frontend service..."
+        gcloud run services delete $FRONTEND_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --quiet 2>/dev/null || print_warning "Frontend service not found"
+        
+        print_info "Deleting backend service..."
+        gcloud run services delete $BACKEND_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --quiet 2>/dev/null || print_warning "Backend service not found"
+        
+        print_success "Services destroyed"
+    else
+        print_info "Destruction cancelled"
     fi
-    
-    # Grant necessary permissions
-    print_info "Granting permissions to service account..."
-    
-    # BigQuery permissions
-    gcloud projects add-iam-policy-binding $PROJECT_ID \
-        --member="serviceAccount:$SERVICE_ACCOUNT" \
-        --role="roles/bigquery.dataViewer" \
-        --quiet
-    
-    gcloud projects add-iam-policy-binding $PROJECT_ID \
-        --member="serviceAccount:$SERVICE_ACCOUNT" \
-        --role="roles/bigquery.jobUser" \
-        --quiet
-    
-    # Vertex AI permissions
-    gcloud projects add-iam-policy-binding $PROJECT_ID \
-        --member="serviceAccount:$SERVICE_ACCOUNT" \
-        --role="roles/aiplatform.user" \
-        --quiet
-    
-    # Cloud Trace permissions (for monitoring)
-    gcloud projects add-iam-policy-binding $PROJECT_ID \
-        --member="serviceAccount:$SERVICE_ACCOUNT" \
-        --role="roles/cloudtrace.agent" \
-        --quiet
-    
-    # Update Cloud Run services to use the service account
-    print_info "Updating Cloud Run services to use service account..."
-    
-    gcloud run services update $SERVICE_NAME_BACKEND \
-        --region=$REGION \
-        --service-account=$SERVICE_ACCOUNT \
-        --quiet
-    
-    print_success "Permissions setup complete"
 }
 
-# Function to display deployment summary
-display_summary() {
+# Start Local Development
+start_local() {
+    print_header "Starting Local Development Servers"
+    
+    # Start backend
+    print_info "Starting backend server..."
+    cd backend
+    if [ -d ".venv" ]; then
+        source .venv/bin/activate
+        adk api_server app --port 8000 --allow_origins="*" &
+        BACKEND_PID=$!
+        print_success "Backend started on http://localhost:8000 (PID: $BACKEND_PID)"
+    else
+        print_error "Virtual environment not found. Run: cd backend && python -m venv .venv && pip install -r requirements.txt"
+        exit 1
+    fi
+    cd ..
+    
+    # Start frontend
+    print_info "Starting frontend server..."
+    cd frontend
+    npm run dev &
+    FRONTEND_PID=$!
+    print_success "Frontend starting on http://localhost:3000 or http://localhost:5173 (PID: $FRONTEND_PID)"
+    cd ..
+    
     echo ""
-    echo "=========================================="
-    echo "Deployment Summary"
-    echo "=========================================="
+    print_info "Press Ctrl+C to stop all services"
+    
+    # Wait for interrupt
+    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
+    wait
+}
+
+# Start Backend Only (Local)
+start_backend_local() {
+    print_header "Starting Backend Server (Local)"
+    
+    cd backend
+    if [ -d ".venv" ]; then
+        source .venv/bin/activate
+        print_info "Starting ADK API server on port 8000..."
+        adk api_server app --port 8000 --allow_origins="*"
+    else
+        print_error "Virtual environment not found. Run: python -m venv .venv && pip install -r requirements.txt"
+        exit 1
+    fi
+}
+
+# Start Frontend Only (Local)
+start_frontend_local() {
+    print_header "Starting Frontend Server (Local)"
+    
+    cd frontend
+    print_info "Starting frontend development server..."
+    npm run dev
+}
+
+# Check Status Function
+check_status() {
+    print_header "Deployment Status"
+    
     echo ""
-    echo -e "${GREEN}✓ Deployment completed successfully!${NC}"
-    echo ""
-    echo "Project ID: $PROJECT_ID"
+    echo "Project: $PROJECT_ID"
     echo "Region: $REGION"
     echo ""
     
-    BACKEND_URL=$(gcloud run services describe $SERVICE_NAME_BACKEND \
+    # Backend status
+    BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE \
         --region=$REGION \
-        --format='value(status.url)' 2>/dev/null || echo "Not deployed")
+        --project=$PROJECT_ID \
+        --format='value(status.url)' 2>/dev/null || echo "")
     
-    FRONTEND_URL=$(gcloud run services describe $SERVICE_NAME_FRONTEND \
-        --region=$REGION \
-        --format='value(status.url)' 2>/dev/null || echo "Not deployed")
-    
-    echo "Backend URL: $BACKEND_URL"
-    echo "Frontend URL: $FRONTEND_URL"
-    echo ""
-    
-    if [ "$ENABLE_UI" = "true" ]; then
-        echo "ADK UI: ${BACKEND_URL}/docs"
+    if [ -n "$BACKEND_URL" ]; then
+        print_success "Backend Service: DEPLOYED"
+        echo "  URL: $BACKEND_URL"
+        echo "  ADK UI: $BACKEND_URL/app/"
+        echo "  API Docs: $BACKEND_URL/docs"
+        
+        # Get backend details
+        BACKEND_DETAILS=$(gcloud run services describe $BACKEND_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --format='value(status.traffic[0].latestRevision,spec.template.spec.containers[0].resources.limits.memory)' 2>/dev/null)
+        echo "  Latest Revision: $(echo $BACKEND_DETAILS | cut -d' ' -f1)"
+        echo "  Memory: $(echo $BACKEND_DETAILS | cut -d' ' -f2)"
+    else
+        print_warning "Backend Service: NOT DEPLOYED"
     fi
     
     echo ""
-    echo "To test the backend API:"
-    echo "  curl ${BACKEND_URL}/health"
-    echo ""
-    echo "To view logs:"
-    echo "  gcloud run logs read --service=$SERVICE_NAME_BACKEND --region=$REGION"
-    echo "  gcloud run logs read --service=$SERVICE_NAME_FRONTEND --region=$REGION"
-    echo ""
     
-    if [ "$ALLOW_UNAUTHENTICATED" = "false" ]; then
-        echo -e "${YELLOW}Note: Services require authentication. Use gcloud auth print-identity-token to get a token.${NC}"
+    # Frontend status
+    FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE \
+        --region=$REGION \
+        --project=$PROJECT_ID \
+        --format='value(status.url)' 2>/dev/null || echo "")
+    
+    if [ -n "$FRONTEND_URL" ]; then
+        print_success "Frontend Service: DEPLOYED"
+        echo "  URL: $FRONTEND_URL"
+        
+        # Get frontend details
+        FRONTEND_DETAILS=$(gcloud run services describe $FRONTEND_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --format='value(status.traffic[0].latestRevision,spec.template.spec.containers[0].resources.limits.memory)' 2>/dev/null)
+        echo "  Latest Revision: $(echo $FRONTEND_DETAILS | cut -d' ' -f1)"
+        echo "  Memory: $(echo $FRONTEND_DETAILS | cut -d' ' -f2)"
+    else
+        print_warning "Frontend Service: NOT DEPLOYED"
     fi
     
-    echo ""
-    echo "To destroy all resources, run: ./destroy.sh"
-    echo ""
+    # Test backend health
+    if [ -n "$BACKEND_URL" ]; then
+        echo ""
+        print_info "Testing backend health..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/docs" 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE" = "200" ]; then
+            print_success "Backend is healthy (HTTP $HTTP_CODE)"
+        elif [ "$HTTP_CODE" = "000" ]; then
+            print_error "Backend is not reachable"
+        else
+            print_warning "Backend returned HTTP $HTTP_CODE"
+        fi
+    fi
 }
 
-# Main deployment flow
+# Main script
 main() {
-    # Parse command line arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --project)
-                PROJECT_ID="$2"
-                shift 2
-                ;;
-            --region)
-                REGION="$2"
-                shift 2
-                ;;
-            --backend-only)
-                BACKEND_ONLY=true
-                shift
-                ;;
-            --frontend-only)
-                FRONTEND_ONLY=true
-                shift
-                ;;
-            --allow-unauthenticated)
-                ALLOW_UNAUTHENTICATED=true
-                shift
-                ;;
-            --help)
-                echo "Usage: $0 [OPTIONS]"
-                echo "Options:"
-                echo "  --project PROJECT_ID         Google Cloud project ID"
-                echo "  --region REGION             Deployment region (default: us-central1)"
-                echo "  --backend-only              Deploy only the backend service"
-                echo "  --frontend-only             Deploy only the frontend service"
-                echo "  --allow-unauthenticated     Allow public access without authentication"
-                echo "  --help                      Show this help message"
-                exit 0
-                ;;
-            *)
-                print_error "Unknown option: $1"
+    # Check if gcloud is installed
+    if ! command -v gcloud &> /dev/null; then
+        print_error "gcloud CLI is not installed. Please install it first."
+        exit 1
+    fi
+    
+    # Check if ADK is installed (for backend deployment)
+    if [[ "${1:-both}" == "backend" ]] || [[ "${1:-both}" == "both" ]]; then
+        if ! command -v adk &> /dev/null; then
+            # Check in venv
+            if [ -f "backend/.venv/bin/adk" ]; then
+                print_info "ADK found in virtual environment"
+            else
+                print_error "ADK is not installed. Please install with: pip install google-adk"
                 exit 1
-                ;;
-        esac
-    done
-    
-    # Run deployment steps
-    check_prerequisites
-    setup_project
-    setup_artifact_registry
-    
-    if [ "$FRONTEND_ONLY" != "true" ]; then
-        deploy_backend
-        setup_permissions
+            fi
+        fi
     fi
     
-    if [ "$BACKEND_ONLY" != "true" ]; then
-        deploy_frontend
-    fi
-    
-    display_summary
+    case "${1:-help}" in
+        # Deployment commands
+        deploy)
+            deploy_backend
+            echo ""
+            deploy_frontend
+            echo ""
+            check_status
+            ;;
+        deploy-backend)
+            deploy_backend
+            ;;
+        deploy-frontend)
+            deploy_frontend
+            ;;
+        
+        # Local development commands
+        local|dev)
+            start_local
+            ;;
+        local-backend)
+            start_backend_local
+            ;;
+        local-frontend)
+            start_frontend_local
+            ;;
+        
+        # Management commands
+        destroy)
+            destroy_services
+            ;;
+        status)
+            check_status
+            ;;
+        
+        # Help
+        help|--help|-h|*)
+            echo "BigQuery Optimizer - Management Script"
+            echo ""
+            echo "Usage: $0 [command]"
+            echo ""
+            echo "DEPLOYMENT COMMANDS:"
+            echo "  deploy           - Deploy both frontend and backend to Cloud Run"
+            echo "  deploy-backend   - Deploy only backend service"
+            echo "  deploy-frontend  - Deploy only frontend service"
+            echo ""
+            echo "LOCAL DEVELOPMENT:"
+            echo "  local (or dev)   - Start both services locally"
+            echo "  local-backend    - Start only backend locally"
+            echo "  local-frontend   - Start only frontend locally"
+            echo ""
+            echo "MANAGEMENT:"
+            echo "  status           - Check deployment status"
+            echo "  destroy          - Delete all Cloud Run services"
+            echo ""
+            echo "CONFIGURATION:"
+            echo "  Project:  $PROJECT_ID"
+            echo "  Region:   $REGION"
+            echo "  Backend:  $BACKEND_SERVICE"
+            echo "  Frontend: $FRONTEND_SERVICE"
+            echo ""
+            echo "EXAMPLES:"
+            echo "  $0 local          # Start local development"
+            echo "  $0 deploy         # Deploy to Cloud Run"
+            echo "  $0 status         # Check deployment status"
+            echo "  $0 destroy        # Remove all services"
+            exit 0
+            ;;
+    esac
 }
 
 # Run main function

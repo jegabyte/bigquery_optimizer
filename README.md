@@ -67,25 +67,51 @@ gcloud services enable bigquery.googleapis.com
 ### 3. Start All Services
 
 ```bash
-# Run the start script
-./start.sh
+# Run the deployment script for local development
+./deploy.sh local
 ```
 
 This will:
-1. Install dependencies automatically
-2. Start the ADK backend on port 8000
-3. Start the React frontend on port 5173
-4. Optionally start the ADK playground on port 8501
+1. Start the ADK backend on port 8000
+2. Start the React frontend on port 3000/5173
+3. Enable CORS for local development
 
 ### 4. Access the Application
 
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **ADK Playground**: http://localhost:8501 (optional)
+- **Frontend**: http://localhost:3000 or http://localhost:5173
+- **Backend API**: http://localhost:8000/docs
+- **ADK UI**: http://localhost:8000/app/
 
 **Login Credentials:**
 - Username: `admin`
 - Password: `bigquery123`
+
+## Deployment
+
+### Deploy to Cloud Run
+
+```bash
+# Deploy both frontend and backend
+./deploy.sh deploy
+
+# Check deployment status
+./deploy.sh status
+
+# Deploy only backend
+./deploy.sh deploy-backend
+
+# Deploy only frontend
+./deploy.sh deploy-frontend
+
+# Destroy all services
+./deploy.sh destroy
+```
+
+### Current Production URLs
+
+- **Frontend**: https://bigquery-optimizer-frontend-puql6kbaxq-uc.a.run.app
+- **Backend**: https://bigquery-optimizer-backend-puql6kbaxq-uc.a.run.app
+- **ADK UI**: https://bigquery-optimizer-backend-puql6kbaxq-uc.a.run.app/app/
 
 ## Manual Setup
 

@@ -3,8 +3,8 @@
  * Handles streaming responses from the ADK server
  */
 
-// Use proxy path instead of direct URL to avoid CORS issues
-const ADK_BASE_URL = '/api';
+// Use environment variable for API URL, fallback to proxy for local dev
+const ADK_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 /**
  * Parse streaming JSON responses from ADK
@@ -798,6 +798,12 @@ function extractJSONFromText(text) {
  * Test ADK connection
  */
 export async function testADKConnection() {
+  // Skip CORS check - assume backend is available if using production URL
+  if (ADK_BASE_URL.includes('run.app')) {
+    console.log('Using deployed backend, skipping CORS check');
+    return true;
+  }
+  
   try {
     // Check if ADK server is running using docs endpoint like reference app
     const response = await fetch(`${ADK_BASE_URL}/docs`, {

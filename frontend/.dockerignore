@@ -1,0 +1,10 @@
+node_modules
+dist
+.env.development
+.env.local
+.git
+.gitignore
+README.md
+.DS_Store
+*.log
+proxy-server.js

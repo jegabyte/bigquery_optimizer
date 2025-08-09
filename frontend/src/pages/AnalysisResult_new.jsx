@@ -439,14 +439,12 @@ const AnalysisResult = () => {
           message: 'Using mock service (ADK not available)'
         });
         
-        const tracker = createProgressTracker();
+        // Create a simple progress simulation for mock service
+        let mockStep = 0;
         const progressInterval = setInterval(() => {
-          const update = tracker.getNextUpdate();
-          if (update) {
-            setCurrentStep(update.step === 'parsing' ? 0 : 
-                         update.step === 'analyzing' ? 1 : 
-                         update.step === 'optimizing' ? 2 : 
-                         update.step === 'validating' ? 3 : 4);
+          if (mockStep < 4) {
+            setCurrentStep(mockStep);
+            mockStep++;
           }
         }, 500);
 
