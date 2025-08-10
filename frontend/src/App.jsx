@@ -6,9 +6,9 @@ import { AuthProvider } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Projects from './pages/Projects';
 import QueryAnalysis from './pages/QueryAnalysis.jsx';
 import AnalysisResult from './pages/AnalysisResult_new.jsx';
-import StorageInsights from './pages/StorageInsights';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const queryClient = new QueryClient();
@@ -47,7 +47,7 @@ function App() {
               <Route path="query-analysis/:analysisId" element={<AnalysisResult />} />
               <Route path="analysis/:analysisId/new" element={<AnalysisResult />} />
               <Route path="analysis/:analysisId" element={<AnalysisResult />} />
-              <Route path="storage-insights" element={<StorageInsights />} />
+              <Route path="projects" element={<Projects />} />
             </Route>
           </Routes>
         </Router>
