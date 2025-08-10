@@ -3,7 +3,7 @@ BigQuery Optimizer ADK Backend
 Root agent configuration for ADK API Server
 """
 
-# Import agent module for ADK deployment
-from . import agent
+# Import root_agent from the agent module
+from .agent import root_agent
 
-__all__ = ["agent"]
+__all__ = ["root_agent"]

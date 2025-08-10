@@ -3,8 +3,8 @@
  * Handles streaming responses from the ADK server
  */
 
-// Use environment variable for API URL, fallback to proxy for local dev
-const ADK_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Use environment variable for API URL, fallback to direct backend URL for local dev
+const ADK_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Parse streaming JSON responses from ADK
@@ -31,18 +31,23 @@ function parseStreamingResponse(text) {
  * Create a session for ADK
  */
 async function createSession(sessionId, userId) {
-  const response = await fetch(`${ADK_BASE_URL}/apps/app/users/${userId}/sessions/${sessionId}`, {
+  const response = await fetch(`${ADK_BASE_URL}/apps/app/users/${userId}/sessions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
-    }
+    },
+    body: JSON.stringify({
+      sessionId: sessionId
+    })
   });
   
   if (!response.ok) {
     throw new Error(`Failed to create session: ${response.statusText}`);
   }
   
-  return await response.json();
+  const sessionData = await response.json();
+  // Return the actual session ID from the response
+  return sessionData.id || sessionId;
 }
 
 /**
@@ -51,13 +56,14 @@ async function createSession(sessionId, userId) {
 export async function optimizeQueryWithADK(query, options = {}) {
   try {
     // Use ADK run_sse endpoint with correct format
-    const sessionId = options.sessionId || `session_${Date.now()}`;
+    const requestedSessionId = options.sessionId || `session_${Date.now()}`;
     const userId = options.userId || 'u_default';
     
-    // Create session first
+    // Create session first and get the actual session ID
+    let actualSessionId = requestedSessionId;
     try {
-      await createSession(sessionId, userId);
-      console.log('Session created:', sessionId);
+      actualSessionId = await createSession(requestedSessionId, userId);
+      console.log('Session created with ID:', actualSessionId);
     } catch (error) {
       console.warn('Session creation failed, continuing anyway:', error);
     }
@@ -70,6 +76,22 @@ export async function optimizeQueryWithADK(query, options = {}) {
       validate: options.validate !== false
     });
     
+    console.log('Sending request to:', `${ADK_BASE_URL}/run_sse`);
+    console.log('Request body:', {
+      appName: 'app',
+      userId: userId,
+      sessionId: actualSessionId,
+      newMessage: {
+        parts: [
+          {
+            text: messageContent
+          }
+        ],
+        role: 'user'
+      },
+      streaming: true
+    });
+
     const response = await fetch(`${ADK_BASE_URL}/run_sse`, {
       method: 'POST',
       headers: { 
@@ -78,7 +100,7 @@ export async function optimizeQueryWithADK(query, options = {}) {
       body: JSON.stringify({
         appName: 'app',
         userId: userId,
-        sessionId: sessionId,
+        sessionId: actualSessionId,
         newMessage: {
           parts: [
             {
@@ -91,19 +113,36 @@ export async function optimizeQueryWithADK(query, options = {}) {
       })
     });
 
+    console.log('Response status:', response.status);
+    console.log('Response headers:', response.headers);
+
     if (!response.ok) {
-      throw new Error(`ADK request failed: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('Response error:', errorText);
+      throw new Error(`ADK request failed: ${response.statusText} - ${errorText}`);
     }
 
     // Handle streaming response
-    const reader = response.body.getReader();
+    const reader = response.body?.getReader();
+    if (!reader) {
+      console.error('No reader available from response body');
+      throw new Error('Unable to read streaming response');
+    }
+
     const decoder = new TextDecoder();
     let buffer = '';
     const events = [];
     
+    console.log('Starting to read stream...');
+    
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      console.log('Read chunk:', { done, valueLength: value?.length });
+      
+      if (done) {
+        console.log('Stream complete');
+        break;
+      }
       
       buffer += decoder.decode(value, { stream: true });
       
@@ -112,9 +151,14 @@ export async function optimizeQueryWithADK(query, options = {}) {
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
       
       for (const line of lines) {
+        if (line.trim() === '') continue; // Skip empty lines
+        
+        console.log('Processing line:', line.substring(0, 100)); // Log first 100 chars
+        
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
+            console.log('Parsed event:', data);
             events.push(data);
             
             // Enhanced logging for debugging - show COMPLETE data

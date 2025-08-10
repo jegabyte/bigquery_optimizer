@@ -53,17 +53,21 @@ print_info() {
 deploy_backend() {
     print_header "Deploying Backend Service with ADK"
     
-    cd backend/app
+    # IMPORTANT: Must be in backend directory for ADK to find root_agent
+    cd backend
     
     print_info "Checking for virtual environment..."
-    if [ -d "../.venv" ]; then
-        source ../.venv/bin/activate
+    if [ -d ".venv" ]; then
+        source .venv/bin/activate
     else
         print_error "Virtual environment not found. Please run 'python -m venv .venv' in backend directory"
         exit 1
     fi
     
-    print_info "Deploying with ADK..."
+    print_info "Deploying with ADK from backend directory..."
+    print_info "Current directory: $(pwd)"
+    
+    # Deploy from within backend folder - this is critical for ADK to find root_agent
     adk deploy cloud_run \
         --project=$PROJECT_ID \
         --region=$REGION \
@@ -159,6 +163,33 @@ destroy_services() {
 start_local() {
     print_header "Starting Local Development Servers"
     
+    # Kill existing processes on ports 8000 and 3000
+    print_info "Checking for existing processes..."
+    
+    # Kill processes on port 8000
+    PORT_8000_PID=$(lsof -ti:8000 2>/dev/null)
+    if [ -n "$PORT_8000_PID" ]; then
+        print_warning "Killing existing process on port 8000 (PID: $PORT_8000_PID)"
+        kill -9 $PORT_8000_PID 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # Kill processes on port 3000
+    PORT_3000_PID=$(lsof -ti:3000 2>/dev/null)
+    if [ -n "$PORT_3000_PID" ]; then
+        print_warning "Killing existing process on port 3000 (PID: $PORT_3000_PID)"
+        kill -9 $PORT_3000_PID 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # Kill any vite processes
+    VITE_PIDS=$(ps aux | grep "vite" | grep -v grep | awk '{print $2}')
+    if [ -n "$VITE_PIDS" ]; then
+        print_warning "Killing existing vite processes"
+        echo $VITE_PIDS | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+    
     # Start backend
     print_info "Starting backend server..."
     cd backend
@@ -178,7 +209,7 @@ start_local() {
     cd frontend
     npm run dev &
     FRONTEND_PID=$!
-    print_success "Frontend starting on http://localhost:3000 or http://localhost:5173 (PID: $FRONTEND_PID)"
+    print_success "Frontend starting on http://localhost:3000 (PID: $FRONTEND_PID)"
     cd ..
     
     echo ""
