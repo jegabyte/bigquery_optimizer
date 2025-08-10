@@ -4,10 +4,10 @@ import { FiCheck, FiLoader, FiDatabase, FiSearch, FiEdit3, FiCheckCircle } from 
 
 const CompactProgressStepper = ({ currentStep, steps, status }) => {
   const defaultSteps = [
-    { id: 'metadata', name: 'Extracting Metadata', icon: FiDatabase },
-    { id: 'analysis', name: 'Anti-Pattern Analysis', icon: FiSearch },
-    { id: 'optimization', name: 'Query Optimization', icon: FiEdit3 },
-    { id: 'validation', name: 'Result Validation', icon: FiCheckCircle },
+    { id: 'metadata', name: 'Metadata Agent', icon: FiDatabase },
+    { id: 'analysis', name: 'Rule Analysis Agent', icon: FiSearch },
+    { id: 'optimization', name: 'Optimization Agent', icon: FiEdit3 },
+    { id: 'validation', name: 'Summary Agent', icon: FiCheckCircle },
   ];
 
   const stepsToShow = steps || defaultSteps;

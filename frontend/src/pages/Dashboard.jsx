@@ -169,11 +169,11 @@ const Dashboard = () => {
             ) : (
               dashboardData.recent_templates.slice(0, 5).map((template) => (
                 <div key={template.template_id} className="p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm font-mono text-gray-800 truncate">{template.sql_snippet}</p>
+                  <p className="text-sm font-mono text-gray-800 truncate">{template.sql_snippet || template.sql_pattern?.substring(0, 100) || 'N/A'}</p>
                   <div className="flex justify-between mt-2 text-xs text-gray-600">
-                    <span>{template.total_runs} runs</span>
-                    <span>{template.gb_processed.toFixed(2)} GB</span>
-                    <span>{new Date(template.last_seen).toLocaleDateString()}</span>
+                    <span>{template.total_runs || 0} runs</span>
+                    <span>{(template.gb_processed || template.total_bytes_processed / 1e9 || 0).toFixed(2)} GB</span>
+                    <span>{template.last_seen ? new Date(template.last_seen).toLocaleDateString() : 'N/A'}</span>
                   </div>
                 </div>
               ))
@@ -194,16 +194,16 @@ const Dashboard = () => {
             ) : (
               dashboardData.top_cost_drivers.map((driver) => (
                 <div key={driver.template_id} className="p-3 bg-red-50 rounded-lg">
-                  <p className="text-sm font-mono text-gray-800 truncate">{driver.sql_snippet}</p>
+                  <p className="text-sm font-mono text-gray-800 truncate">{driver.sql_snippet || driver.sql_pattern?.substring(0, 100) || 'N/A'}</p>
                   <div className="flex justify-between mt-2">
-                    <span className="text-xs text-gray-600">{driver.total_runs} runs</span>
+                    <span className="text-xs text-gray-600">{driver.total_runs || 0} runs</span>
                     <span className="text-sm font-semibold text-red-600">
-                      ${driver.estimated_cost.toFixed(2)}
+                      ${(driver.estimated_cost || 0).toFixed(2)}
                     </span>
                   </div>
                   <div className="mt-1">
                     <span className="text-xs text-gray-500">
-                      {driver.tb_processed.toFixed(3)} TB processed
+                      {(driver.tb_processed || driver.total_bytes_processed / 1e12 || 0).toFixed(3)} TB processed
                     </span>
                   </div>
                 </div>

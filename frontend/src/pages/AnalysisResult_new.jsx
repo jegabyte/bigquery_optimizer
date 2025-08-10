@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
 import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus, FiTrendingDown, FiZap, FiActivity, FiLayout, FiCode } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { analyses } from '../services/database';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
 import { optimizeQueryWithADK, testADKConnection } from '../services/adk';
+import { saveAnalysisToFirestore, getAnalysisFromFirestore, isFirestoreAvailable } from '../services/analysisService';
 
 // BigQuery-style SQL Formatter
 const formatSQL = (sql) => {
@@ -145,6 +145,7 @@ const AnalysisResult = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isNew = location.pathname.includes('/new');
+  const agenticWorkflowRef = useRef(null);
 
   // Core state
   const [mode, setMode] = useState(isNew ? 'edit' : 'loading');
@@ -241,34 +242,57 @@ const AnalysisResult = () => {
         return;
       }
       
-      // Otherwise check database
-      const existingAnalysis = await analyses.getByAnalysisId(analysisId);
-      if (existingAnalysis) {
-        setQuery(existingAnalysis.query || existingAnalysis.originalQuery);
-        setOptions(existingAnalysis.options || {
-          rewrite: true,
-          validate: false,
-          projectName: 'Default Project'
-        });
-        setResult({
-          originalQuery: existingAnalysis.originalQuery,
-          optimizedQuery: existingAnalysis.optimizedQuery,
-          issues: existingAnalysis.issues,
-          validationResult: existingAnalysis.validationResult,
-          metadata: existingAnalysis.metadata
-        });
-        
-        // Load stage data if available
-        if (existingAnalysis.metadata?.stages) {
-          setStageData(existingAnalysis.metadata.stages);
+      // Check Firestore if available
+      try {
+        const firestoreAvailable = await isFirestoreAvailable();
+        if (firestoreAvailable) {
+          const firestoreAnalysis = await getAnalysisFromFirestore(analysisId);
+          if (firestoreAnalysis) {
+            console.log('Loaded analysis from Firestore:', firestoreAnalysis);
+            
+            setQuery(firestoreAnalysis.query || '');
+            setOptions(firestoreAnalysis.options || {
+              projectId: '',
+              datasetId: '',
+              validate: true,
+              projectName: 'Default Project'
+            });
+            setResult(firestoreAnalysis.result);
+            
+            // Load stage data
+            if (firestoreAnalysis.stage_data) {
+              setStageData(firestoreAnalysis.stage_data);
+            } else if (firestoreAnalysis.result?.metadata?.stages) {
+              setStageData(firestoreAnalysis.result.metadata.stages);
+            }
+            
+            setOriginalQuery(firestoreAnalysis.query);
+            setOriginalOptions(firestoreAnalysis.options);
+            setMode('view');
+            setAnalysisStatus('completed');
+            setCurrentStep(-1);
+            setShowProgress(false);
+            
+            // Also save to localStorage for quick access
+            localStorage.setItem(`analysis-result-${analysisId}`, JSON.stringify({
+              id: analysisId,
+              query: firestoreAnalysis.query,
+              options: firestoreAnalysis.options,
+              result: firestoreAnalysis.result,
+              stageData: firestoreAnalysis.stage_data,
+              timestamp: firestoreAnalysis.created_at || firestoreAnalysis.timestamp
+            }));
+            
+            return;
+          }
         }
-        
-        setOriginalQuery(existingAnalysis.query || existingAnalysis.originalQuery);
-        setOriginalOptions(existingAnalysis.options);
-        setMode('view');
-      } else {
-        setMode('edit');
+      } catch (firestoreError) {
+        console.error('Error loading from Firestore:', firestoreError);
+        // Continue with localStorage data if available
       }
+      
+      // If not found in Firestore or localStorage, start in edit mode
+      setMode('edit');
     } catch (error) {
       console.error('Error loading analysis:', error);
       setMode('edit');
@@ -310,6 +334,16 @@ const AnalysisResult = () => {
     setAnalysisStatus('analyzing');
     setStageData({});
     setBackendStatus(null);
+    
+    // Scroll to Agentic Workflow Stages section
+    setTimeout(() => {
+      if (agenticWorkflowRef.current) {
+        agenticWorkflowRef.current.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'start'
+        });
+      }
+    }, 100);
 
     let optimizationResult = null; // Declare at the beginning of try block
 
@@ -486,22 +520,21 @@ const AnalysisResult = () => {
       };
       localStorage.setItem(`analysis-result-${analysisId}`, JSON.stringify(analysisData));
       
-      // Also save to IndexedDB for permanent storage
+      // Save to Firestore if available
       try {
-        await analyses.create({
-          analysisId: analysisId,
-          query: query,
-          originalQuery: query,
-          optimizedQuery: finalResult.optimizedQuery,
-          issues: finalResult.issues,
-          validationResult: finalResult.validationResult,
-          metadata: finalResult.metadata,
-          options: options,
-          stageData: stageData
-        });
-      } catch (dbError) {
-        console.error('Failed to save to database:', dbError);
-        // Continue even if DB save fails - localStorage has the data
+        const firestoreAvailable = await isFirestoreAvailable();
+        if (firestoreAvailable) {
+          const firestoreResult = await saveAnalysisToFirestore({
+            ...analysisData,
+            projectId: options.projectId || 'default'
+          });
+          if (firestoreResult && firestoreResult.analysis_id) {
+            console.log('Analysis saved to Firestore with ID:', firestoreResult.analysis_id);
+          }
+        }
+      } catch (firestoreError) {
+        console.error('Failed to save to Firestore:', firestoreError);
+        toast.warning('Analysis saved locally only - cloud storage unavailable');
       }
       
       // Clear the temporary analysis data
@@ -785,16 +818,17 @@ const AnalysisResult = () => {
         </div>
       )}
 
-      {/* Optimization Stages Display - Show during and after analysis */}
+      {/* Agentic Workflow Stages Display - Show during and after analysis */}
       {(showProgress || (mode === 'view' && result && (Object.keys(stageData).length > 0 || result.metadata?.stages))) && (
         <motion.div
+          ref={agenticWorkflowRef}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="card mb-4"
         >
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimization Stages</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Agentic Workflow Stages</h3>
           <div className="space-y-2">
-            {/* Stage 1: Metadata Extraction */}
+            {/* Stage 1: Metadata Extraction Agent */}
             <div>
               <button
                 onClick={() => getStageData('metadata') && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
@@ -817,7 +851,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!getStageData('metadata') && currentStep !== 0 ? 'text-gray-400' : ''}`}>
-                      Metadata Extraction
+                      Metadata Extraction Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -947,7 +981,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 2: Rule Analysis */}
+            {/* Stage 2: Rule Analysis Agent */}
             <div>
               <button
                 onClick={() => getStageData('rules') && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
@@ -970,7 +1004,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!getStageData('rules') && currentStep !== 1 ? 'text-gray-400' : ''}`}>
-                      Rule Analysis
+                      Rule Analysis Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -1082,7 +1116,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 3: Query Optimization */}
+            {/* Stage 3: Query Optimization Agent */}
             <div>
               <button
                 onClick={() => getStageData('optimization') && setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
@@ -1105,7 +1139,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!getStageData('optimization') && currentStep !== 2 ? 'text-gray-400' : ''}`}>
-                      Query Optimization
+                      Query Optimization Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -1274,7 +1308,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 4: Final Report */}
+            {/* Stage 4: Optimization Summary Agent */}
             <div>
               <button
                 onClick={() => getStageData('report') && setSelectedStage(selectedStage === 'report' ? null : 'report')}
@@ -1297,7 +1331,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!getStageData('report') && currentStep !== 3 ? 'text-gray-400' : ''}`}>
-                      Final Report
+                      Optimization Summary Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">

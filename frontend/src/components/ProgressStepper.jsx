@@ -4,10 +4,10 @@ import { FiCheck, FiLoader, FiDatabase, FiSearch, FiEdit3, FiCheckCircle } from 
 
 const ProgressStepper = ({ currentStep, steps }) => {
   const defaultSteps = [
-    { id: 'metadata', name: 'Extracting Metadata', icon: FiDatabase, description: 'Analyzing table schemas and structure' },
-    { id: 'analysis', name: 'Anti-Pattern Analysis', icon: FiSearch, description: 'Checking against optimization rules' },
-    { id: 'optimization', name: 'Query Optimization', icon: FiEdit3, description: 'Generating optimized SQL' },
-    { id: 'validation', name: 'Result Validation', icon: FiCheckCircle, description: 'Comparing results and costs' },
+    { id: 'metadata', name: 'Metadata Agent', icon: FiDatabase, description: 'Agent analyzing table schemas and structure' },
+    { id: 'analysis', name: 'Rule Analysis Agent', icon: FiSearch, description: 'Agent checking optimization rules' },
+    { id: 'optimization', name: 'Optimization Agent', icon: FiEdit3, description: 'Agent generating optimized SQL' },
+    { id: 'validation', name: 'Summary Agent', icon: FiCheckCircle, description: 'Agent generating optimization summary' },
   ];
 
   const stepsToShow = steps || defaultSteps;

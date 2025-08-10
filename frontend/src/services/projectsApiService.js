@@ -69,6 +69,11 @@ class ProjectsApiService {
       return data;
     } catch (error) {
       console.error('Error creating project:', error);
+      // Try to extract error message from response
+      if (error.response) {
+        const errorData = await error.response.json();
+        throw new Error(errorData.detail || 'Failed to create project');
+      }
       throw error;
     }
   }

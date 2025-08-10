@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiPlus, FiCheckCircle, FiAlertCircle, FiSearch, FiFilter, FiChevronDown, FiEye, FiTrendingUp, FiClock, FiZap } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { getRecentAnalyses, isFirestoreAvailable } from '../services/analysisService';
 
 const QueryAnalysis = () => {
   const navigate = useNavigate();
@@ -15,30 +16,112 @@ const QueryAnalysis = () => {
     loadAnalyses();
   }, []);
 
-  const loadAnalyses = () => {
+  const loadAnalyses = async () => {
     try {
-      // Get all analyses from localStorage
-      const allKeys = Object.keys(localStorage);
-      const analysisKeys = allKeys.filter(key => key.startsWith('analysis-result-'));
-      
-      const loadedAnalyses = analysisKeys.map(key => {
-        const data = JSON.parse(localStorage.getItem(key));
-        return {
-          id: key.replace('analysis-result-', ''),
-          query: data.query,
-          timestamp: data.timestamp || new Date().toISOString(),
-          status: data.result?.error ? 'error' : 'completed',
-          issues: data.result?.issues?.length || 0,
-          costReduction: data.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || '0%',
-          optimized: !!data.result?.optimizedQuery,
-          performance: data.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 'N/A',
-          dataReduction: data.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A'
-        };
-      });
+      let allAnalyses = [];
+
+      // Primary source: Firestore (cloud storage)
+      try {
+        const firestoreAvailable = await isFirestoreAvailable();
+        if (firestoreAvailable) {
+          const firestoreAnalyses = await getRecentAnalyses({}, 100); // Get up to 100 recent analyses
+          
+          for (const analysis of firestoreAnalyses) {
+            const analysisData = {
+              id: analysis.id,
+              query: analysis.query,
+              timestamp: analysis.timestamp || analysis.created_at || new Date().toISOString(),
+              status: analysis.result?.error ? 'error' : 'completed',
+              issues: analysis.result?.issues?.length || 0,
+              costReduction: analysis.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || 
+                             analysis.result?.validationResult?.costSavings ? `${analysis.result.validationResult.costSavings}%` : '0%',
+              optimized: !!analysis.result?.optimizedQuery,
+              performance: analysis.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 
+                          analysis.result?.metadata?.stages?.report?.executive_summary?.performance_gain || 'N/A',
+              dataReduction: analysis.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A',
+              source: 'firestore'
+            };
+            
+            allAnalyses.push(analysisData);
+          }
+          
+          console.log(`Loaded ${firestoreAnalyses.length} analyses from Firestore`);
+        } else {
+          // Fallback to localStorage only if Firestore is unavailable
+          console.log('Firestore unavailable, falling back to localStorage');
+          
+          const allKeys = Object.keys(localStorage);
+          const analysisKeys = allKeys.filter(key => key.startsWith('analysis-result-'));
+          
+          for (const key of analysisKeys) {
+            try {
+              const data = JSON.parse(localStorage.getItem(key));
+              const id = key.replace('analysis-result-', '');
+              
+              const analysisData = {
+                id: id,
+                query: data.query,
+                timestamp: data.timestamp || new Date().toISOString(),
+                status: data.result?.error ? 'error' : 'completed',
+                issues: data.result?.issues?.length || 0,
+                costReduction: data.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || '0%',
+                optimized: !!data.result?.optimizedQuery,
+                performance: data.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 'N/A',
+                dataReduction: data.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A',
+                source: 'localstorage'
+              };
+              
+              allAnalyses.push(analysisData);
+            } catch (e) {
+              console.error('Error parsing localStorage item:', key, e);
+            }
+          }
+          
+          console.log(`Loaded ${analysisKeys.length} analyses from localStorage`);
+          
+          if (analysisKeys.length > 0) {
+            toast.info('Loaded analyses from local cache (offline mode)');
+          }
+        }
+      } catch (firestoreError) {
+        console.error('Error loading from Firestore:', firestoreError);
+        
+        // Fallback to localStorage on error
+        const allKeys = Object.keys(localStorage);
+        const analysisKeys = allKeys.filter(key => key.startsWith('analysis-result-'));
+        
+        for (const key of analysisKeys) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key));
+            const id = key.replace('analysis-result-', '');
+            
+            const analysisData = {
+              id: id,
+              query: data.query,
+              timestamp: data.timestamp || new Date().toISOString(),
+              status: data.result?.error ? 'error' : 'completed',
+              issues: data.result?.issues?.length || 0,
+              costReduction: data.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || '0%',
+              optimized: !!data.result?.optimizedQuery,
+              performance: data.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 'N/A',
+              dataReduction: data.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A',
+              source: 'localstorage'
+            };
+            
+            allAnalyses.push(analysisData);
+          } catch (e) {
+            console.error('Error parsing localStorage item:', key, e);
+          }
+        }
+        
+        toast.warning('Using local cache - cloud storage unavailable');
+      }
 
       // Sort by timestamp (newest first)
-      loadedAnalyses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      setAnalyses(loadedAnalyses);
+      allAnalyses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      setAnalyses(allAnalyses);
+      
+      console.log(`Total analyses loaded: ${allAnalyses.length}`);
     } catch (error) {
       console.error('Error loading analyses:', error);
       toast.error('Failed to load analyses');

@@ -11,7 +11,9 @@ import {
   FiClock,
   FiBarChart2,
   FiServer,
-  FiRefreshCw
+  FiRefreshCw,
+  FiDollarSign,
+  FiTrendingUp
 } from 'react-icons/fi';
 import { formatBytes, formatCost, formatRuntime, getTemplateRuns } from '../../services/projectsMockData';
 import MonacoEditor from '@monaco-editor/react';
@@ -26,7 +28,8 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
 
   useEffect(() => {
     if (template && isOpen) {
-      setRuns(getTemplateRuns(template.id));
+      // Use recent runs from the template data
+      setRuns(template.recentRuns || []);
       setActiveTab('overview');
     }
   }, [template, isOpen]);
@@ -48,7 +51,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'runs', label: `Runs (${runs.length})` },
+    { id: 'runs', label: `Runs (${template.runs || 0})` },
     { id: 'analyze', label: 'Analyze' },
     { id: 'results', label: 'Results', disabled: !template.lastAnalysis }
   ];
@@ -152,17 +155,17 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                     <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                       Performance Metrics
                     </h3>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
                       <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-2">
                           <FiServer className="h-4 w-4 text-gray-500" />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">Bytes Processed</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Data Processed</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {formatBytes(template.bytesProcessedP90)}
+                          {formatBytes(template.avgBytesProcessed || 0)}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          P90 • P99: {formatBytes(template.bytesProcessedP99)}
+                          Avg per run • P90: {formatBytes(template.bytesProcessedP90 || 0)}
                         </p>
                       </div>
 
@@ -172,23 +175,51 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                           <span className="text-xs text-gray-500 dark:text-gray-400">Runtime</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {formatRuntime(template.runtimeP50)}
+                          {formatRuntime(template.avgRuntime || 0)}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          P50 • Slot-ms: {(template.slotMsP50 / 1000).toFixed(0)}s
+                          Avg • P50: {formatRuntime(template.runtimeP50 || 0)}
                         </p>
                       </div>
-
-                      <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-2">
-                          <FiBarChart2 className="h-4 w-4 text-gray-500" />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">Frequency</span>
+                          <FiBarChart2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <span className="text-xs text-blue-600 dark:text-blue-400">Frequency</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                           {template.runs}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Total runs • {template.runsPerDay}/day
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          Total runs • {(template.runsPerDay || 0).toFixed(1)}/day
+                        </p>
+                      </div>
+
+                      <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <FiDollarSign className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          <span className="text-xs text-green-600 dark:text-green-400">Cost per Run</span>
+                        </div>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          ${(template.avgCostPerRun || 0).toFixed(3)}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          Total: ${(template.totalCost || 0).toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <FiTrendingUp className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                          <span className="text-xs text-orange-600 dark:text-orange-400">Monthly Cost</span>
+                        </div>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          ${(template.estimatedMonthlyCost || 0).toFixed(2)}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          Estimated
                         </p>
                       </div>
                     </div>
@@ -266,45 +297,64 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                       Individual query executions for this template over the analysis window.
                     </p>
                   </div>
-                  <div className="space-y-2">
-                    {runs.map((run) => (
+                  {runs.length === 0 && template.runs > 0 ? (
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                      <p className="text-gray-600 dark:text-gray-400">
+                        This template has been executed <span className="font-semibold">{template.runs}</span> times
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                        Detailed run history will be available after full analysis
+                      </p>
+                    </div>
+                  ) : runs.length === 0 ? (
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                      <p className="text-gray-600 dark:text-gray-400">
+                        No runs recorded for this template
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                    {runs.map((run, idx) => (
                       <div
-                        key={run.id}
+                        key={run.job_id || idx}
                         className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50"
                       >
                         <div className="flex items-start justify-between">
                           <div>
                             <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {run.startTime.toLocaleString()}
+                              {run.start_time ? new Date(run.start_time).toLocaleString() : 'N/A'}
                             </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              Job ID: {run.jobId}
+                              Job ID: {run.job_id}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              User: {run.user_email}
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm text-gray-900 dark:text-gray-100">
-                              {formatBytes(run.bytesProcessed)}
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              ${(run.estimated_cost || 0).toFixed(4)}
                             </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {formatRuntime(run.runtime)}
+                              {formatBytes(run.bytes_processed || 0)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {formatRuntime(run.runtime_seconds || 0)}
                             </p>
                           </div>
                         </div>
-                        {Object.keys(run.labels).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {Object.entries(run.labels).map(([key, value]) => (
-                              <span
-                                key={key}
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
-                              >
-                                {key}: {value}
-                              </span>
-                            ))}
+                        {run.slot_ms && (
+                          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                            <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                              <span>Slot time: {(run.slot_ms / 1000).toFixed(1)}s</span>
+                              <span>Billed: {formatBytes(run.bytes_billed || run.bytes_processed || 0)}</span>
+                            </div>
                           </div>
                         )}
                       </div>
                     ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
 

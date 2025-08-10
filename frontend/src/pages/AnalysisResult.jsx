@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
 import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus, FiTrendingDown, FiZap, FiActivity } from 'react-icons/fi';
@@ -13,6 +13,7 @@ const AnalysisResult = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isNew = location.pathname.includes('/new');
+  const agenticWorkflowRef = useRef(null);
 
   // Core state
   const [mode, setMode] = useState(isNew ? 'edit' : 'loading');
@@ -141,6 +142,16 @@ const AnalysisResult = () => {
     setAnalysisStatus('analyzing');
     setStageData({});
     setBackendStatus(null);
+    
+    // Scroll to Agentic Workflow Stages section
+    setTimeout(() => {
+      if (agenticWorkflowRef.current) {
+        agenticWorkflowRef.current.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'start'
+        });
+      }
+    }, 100);
 
     try {
       // Test ADK connection first
@@ -560,16 +571,17 @@ const AnalysisResult = () => {
         </div>
       )}
 
-      {/* Optimization Stages Display */}
+      {/* Agentic Workflow Stages Display */}
       {showProgress && (
         <motion.div
+          ref={agenticWorkflowRef}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="card mb-4"
         >
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimization Stages</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Agentic Workflow Stages</h3>
           <div className="space-y-2">
-            {/* Stage 1: Metadata Extraction */}
+            {/* Stage 1: Metadata Extraction Agent */}
             <div>
               <button
                 onClick={() => stageData.metadata && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
@@ -592,7 +604,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!stageData.metadata && currentStep !== 0 ? 'text-gray-400' : ''}`}>
-                      Metadata Extraction
+                      Metadata Extraction Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -617,7 +629,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 2: Rule Analysis */}
+            {/* Stage 2: Rule Analysis Agent */}
             <div>
               <button
                 onClick={() => stageData.rules && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
@@ -640,7 +652,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!stageData.rules && currentStep !== 1 ? 'text-gray-400' : ''}`}>
-                      Anti-Pattern Analysis
+                      Rule Analysis Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -669,7 +681,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 3: Query Optimization */}
+            {/* Stage 3: Query Optimization Agent */}
             <div>
               <button
                 onClick={() => stageData.optimization && setSelectedStage(selectedStage === 'optimization' ? null : 'optimization')}
@@ -692,7 +704,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!stageData.optimization && currentStep !== 2 ? 'text-gray-400' : ''}`}>
-                      Query Optimization
+                      Query Optimization Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -721,7 +733,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 4: Final Report */}
+            {/* Stage 4: Optimization Summary Agent */}
             <div>
               <button
                 onClick={() => stageData.report && setSelectedStage(selectedStage === 'report' ? null : 'report')}
@@ -744,7 +756,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!stageData.report && currentStep !== 3 ? 'text-gray-400' : ''}`}>
-                      Final Report
+                      Optimization Summary Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">

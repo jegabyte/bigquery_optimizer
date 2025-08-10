@@ -13,11 +13,16 @@
 
 set -e
 
+# Get the directory of this script and ensure we're in the project root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
 # Configuration
 PROJECT_ID="aiva-e74f3"
 REGION="us-central1"
 BACKEND_SERVICE="bigquery-optimizer-backend"
 FRONTEND_SERVICE="bigquery-optimizer-frontend"
+BQ_API_SERVICE="bq-api"
 
 # Colors for output
 RED='\033[0;31m'
@@ -86,7 +91,44 @@ deploy_backend() {
     print_success "Backend deployed at: $BACKEND_URL"
     print_info "ADK UI available at: $BACKEND_URL/app/"
     print_info "API Docs available at: $BACKEND_URL/docs"
-    cd ../..
+    
+    # Return to root directory
+    cd ..
+}
+
+# Deploy BQ API Function (with Firestore backend)
+deploy_bq_api() {
+    print_header "Deploying BigQuery API Service (Firestore Backend)"
+    
+    cd bq-api
+    
+    print_info "Building and deploying BQ API with Firestore integration..."
+    print_info "This service uses Firestore database for storing projects, templates, and analyses"
+    
+    # Build and push Docker image
+    docker build -t gcr.io/${PROJECT_ID}/${BQ_API_SERVICE} .
+    docker push gcr.io/${PROJECT_ID}/${BQ_API_SERVICE}
+    
+    # Deploy to Cloud Run with Firestore environment variables
+    gcloud run deploy ${BQ_API_SERVICE} \
+        --image gcr.io/${PROJECT_ID}/${BQ_API_SERVICE} \
+        --platform managed \
+        --region ${REGION} \
+        --allow-unauthenticated \
+        --set-env-vars BQ_PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID} \
+        --memory 512Mi \
+        --timeout 60 \
+        --max-instances 10
+    
+    BQ_API_URL=$(gcloud run services describe $BQ_API_SERVICE \
+        --region=$REGION \
+        --project=$PROJECT_ID \
+        --format='value(status.url)')
+    
+    print_success "BQ API deployed at: $BQ_API_URL"
+    
+    # Return to root directory
+    cd ..
 }
 
 # Deploy Frontend Function
@@ -106,11 +148,23 @@ deploy_frontend() {
         exit 1
     fi
     
+    # Get BQ API URL
+    BQ_API_URL=$(gcloud run services describe $BQ_API_SERVICE \
+        --region=$REGION \
+        --project=$PROJECT_ID \
+        --format='value(status.url)' 2>/dev/null || echo "")
+    
+    if [ -z "$BQ_API_URL" ]; then
+        print_warning "BQ API service not found. Frontend will use mock data."
+    fi
+    
     print_info "Backend URL: $BACKEND_URL"
+    print_info "BQ API URL: $BQ_API_URL"
     print_info "Building and deploying frontend..."
     
-    # Update Dockerfile with correct backend URL
+    # Update Dockerfile with correct backend URLs
     sed -i.bak "s|ENV VITE_API_URL=.*|ENV VITE_API_URL=$BACKEND_URL|" Dockerfile
+    sed -i.bak "s|ENV VITE_BQ_API_URL=.*|ENV VITE_BQ_API_URL=$BQ_API_URL|" Dockerfile
     rm -f Dockerfile.bak
     
     gcloud run deploy $FRONTEND_SERVICE \
@@ -152,6 +206,12 @@ destroy_services() {
             --region=$REGION \
             --project=$PROJECT_ID \
             --quiet 2>/dev/null || print_warning "Backend service not found"
+        
+        print_info "Deleting BQ API service..."
+        gcloud run services delete $BQ_API_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --quiet 2>/dev/null || print_warning "BQ API service not found"
         
         print_success "Services destroyed"
     else
@@ -278,6 +338,30 @@ check_status() {
     
     echo ""
     
+    # BQ API status
+    BQ_API_URL=$(gcloud run services describe $BQ_API_SERVICE \
+        --region=$REGION \
+        --project=$PROJECT_ID \
+        --format='value(status.url)' 2>/dev/null || echo "")
+    
+    if [ -n "$BQ_API_URL" ]; then
+        print_success "BQ API Service: DEPLOYED"
+        echo "  URL: $BQ_API_URL"
+        echo "  API Docs: $BQ_API_URL/docs"
+        
+        # Get BQ API details
+        BQ_API_DETAILS=$(gcloud run services describe $BQ_API_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --format='value(status.traffic[0].latestRevision,spec.template.spec.containers[0].resources.limits.memory)' 2>/dev/null)
+        echo "  Latest Revision: $(echo $BQ_API_DETAILS | cut -d' ' -f1)"
+        echo "  Memory: $(echo $BQ_API_DETAILS | cut -d' ' -f2)"
+    else
+        print_warning "BQ API Service: NOT DEPLOYED"
+    fi
+    
+    echo ""
+    
     # Frontend status
     FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE \
         --region=$REGION \
@@ -340,12 +424,17 @@ main() {
         deploy)
             deploy_backend
             echo ""
+            deploy_bq_api
+            echo ""
             deploy_frontend
             echo ""
             check_status
             ;;
         deploy-backend)
             deploy_backend
+            ;;
+        deploy-bq-api)
+            deploy_bq_api
             ;;
         deploy-frontend)
             deploy_frontend

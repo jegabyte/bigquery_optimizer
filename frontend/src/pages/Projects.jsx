@@ -14,6 +14,7 @@ import ProjectDetailView from '../components/projects/ProjectDetailView';
 import ProjectOnboarding from '../components/projects/ProjectOnboarding';
 import { formatCost } from '../services/projectsMockData';
 import { projectsApiService } from '../services/projectsApiService';
+import toast from 'react-hot-toast';
 
 const Projects = () => {
   const [projects, setProjects] = useState([]);
@@ -83,26 +84,56 @@ const Projects = () => {
     // TODO: Implement pause functionality
   };
 
-  const handleOnboardingComplete = (newProject) => {
-    console.log('New project:', newProject);
-    // Add new project to the list
-    const project = {
-      id: `proj-${Date.now()}`,
-      ...newProject,
-      lastUpdated: new Date(),
-      stats: {
-        templatesDiscovered: 0,
-        totalRuns: 0,
-        estimatedMonthlySpend: 0,
-        potentialSavings: 0,
-        complianceScore: 0
-      },
-      topCostDrivers: []
-    };
-    setProjects([...projects, project]);
-    setIsOnboardingOpen(false);
-    // Automatically select the new project
-    setSelectedProject(project);
+  const handleOnboardingComplete = async (newProject) => {
+    console.log('New project configuration:', newProject);
+    
+    // Show loading toast
+    const loadingToast = toast.loading('Creating project and fetching data from INFORMATION_SCHEMA...');
+    
+    try {
+      // Create the project via API (this will scan INFORMATION_SCHEMA and create templates)
+      const projectConfig = {
+        project_id: newProject.projectId,
+        display_name: newProject.name || newProject.projectId,
+        analysis_window: newProject.analysisWindow || 30,
+        regions: newProject.regions || [],
+        datasets: newProject.datasets || [],
+        pricing_mode: newProject.pricingMode || 'on-demand',
+        price_per_tb: newProject.pricePerTB || 5.00,
+        auto_detect_regions: newProject.autoDetectRegions !== false,
+        auto_detect_datasets: newProject.autoDetectDatasets !== false
+      };
+      
+      const result = await projectsApiService.createProject(projectConfig);
+      
+      toast.dismiss(loadingToast);
+      
+      if (result.success) {
+        // Show success with scan results
+        const scanResult = result.scan_result;
+        toast.success(
+          `Project created! Found ${scanResult.templates_discovered} query templates from ${scanResult.total_queries_analyzed} queries`,
+          { duration: 5000 }
+        );
+        
+        // Reload projects list to include the new project
+        await loadProjects();
+        
+        setIsOnboardingOpen(false);
+        
+        // Find and select the newly created project
+        const createdProject = projects.find(p => p.projectId === newProject.projectId);
+        if (createdProject) {
+          setSelectedProject(createdProject);
+        }
+      } else {
+        toast.error('Failed to create project');
+      }
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      console.error('Error creating project:', error);
+      toast.error(error.message || 'Failed to create project. Please check your permissions.');
+    }
   };
 
   // Calculate totals
