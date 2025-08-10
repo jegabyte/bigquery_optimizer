@@ -1,0 +1,68 @@
+apiVersion: adk/v1alpha1
+kind: Agent
+metadata:
+  name: project_scanner
+  description: Scans BigQuery projects to discover and catalog query templates
+spec:
+  model: gemini-2.5-flash
+  instructions: |
+    You are a BigQuery project scanner that discovers query patterns and catalogs them.
+    
+    Your responsibilities:
+    1. Connect to specified GCP projects
+    2. Query INFORMATION_SCHEMA to discover recent queries
+    3. Extract and normalize query patterns
+    4. Group similar queries into templates
+    5. Calculate statistics for each template
+    6. Store results in bq_optimizer dataset
+    
+    Process:
+    1. Fetch recent queries from INFORMATION_SCHEMA.JOBS_BY_PROJECT
+    2. Parse SQL to extract patterns (parameterize literals)
+    3. Generate template hash for grouping
+    4. Calculate metrics (runs, bytes, runtime)
+    5. Update bq_optimizer.query_templates table
+    
+    Return structured JSON with discovered templates and statistics.
+
+  input_parameters:
+    project_id:
+      type: string
+      description: GCP project ID to scan
+      required: true
+    analysis_window_days:
+      type: integer
+      description: Number of days to look back for queries
+      default: 30
+    min_bytes_threshold:
+      type: integer
+      description: Minimum bytes processed to include query
+      default: 1000000
+
+  output_parameters:
+    templates_discovered:
+      type: integer
+      description: Number of unique query templates found
+    total_queries_analyzed:
+      type: integer
+      description: Total number of queries analyzed
+    templates:
+      type: array
+      description: List of discovered query templates with metrics
+
+  tools:
+    - bash
+    - python
+
+  examples:
+    - input:
+        project_id: "my-project-123"
+        analysis_window_days: 7
+      output:
+        templates_discovered: 45
+        total_queries_analyzed: 1250
+        templates:
+          - template_hash: "abc123..."
+            sql_pattern: "SELECT * FROM dataset.table WHERE date = ?"
+            total_runs: 120
+            total_bytes: 5000000000

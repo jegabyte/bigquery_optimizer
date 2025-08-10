@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   FiArrowLeft,
@@ -18,13 +18,41 @@ import {
 } from 'react-icons/fi';
 import TemplatesGrid from './TemplatesGrid';
 import TemplateDetails from './TemplateDetails';
-import { getProjectTemplates, formatCost } from '../../services/projectsMockData';
+import { formatCost } from '../../services/projectsMockData';
+import { projectsApiService } from '../../services/projectsApiService';
 
 const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPause }) => {
-  const [templates] = useState(getProjectTemplates(project.id));
+  const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [isTemplateDrawerOpen, setIsTemplateDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('templates');
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+
+  // Fetch templates when component mounts or project changes
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      setIsLoadingTemplates(true);
+      try {
+        const templatesData = await projectsApiService.getProjectTemplates(project.projectId);
+        // Convert date strings to Date objects for the component
+        const templatesWithDates = templatesData.map(template => ({
+          ...template,
+          firstSeen: template.firstSeen ? new Date(template.firstSeen) : null,
+          lastSeen: template.lastSeen ? new Date(template.lastSeen) : null
+        }));
+        setTemplates(templatesWithDates);
+      } catch (error) {
+        console.error('Failed to fetch templates:', error);
+        setTemplates([]);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+
+    if (project?.projectId) {
+      fetchTemplates();
+    }
+  }, [project]);
 
   const handleTemplateClick = (template) => {
     setSelectedTemplate(template);
@@ -63,17 +91,6 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Warning Banner */}
-      <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex items-center">
-            <FiAlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-            <p className="ml-3 text-sm font-medium text-yellow-800 dark:text-yellow-300">
-              This is a mock page with sample data. The actual implementation is yet to be completed.
-            </p>
-          </div>
-        </div>
-      </div>
 
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -262,11 +279,17 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       {/* Tab Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'templates' && (
-          <TemplatesGrid
-            templates={templates}
-            onTemplateClick={handleTemplateClick}
-            onBulkAction={handleBulkAction}
-          />
+          isLoadingTemplates ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+          ) : (
+            <TemplatesGrid
+              templates={templates}
+              onTemplateClick={handleTemplateClick}
+              onBulkAction={handleBulkAction}
+            />
+          )
         )}
 
         {activeTab === 'overview' && (

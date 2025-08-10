@@ -1,0 +1,49 @@
+apiVersion: adk/v1alpha1
+kind: Agent
+metadata:
+  name: bigquery_executor
+  description: Executes BigQuery queries for project scanning and data management
+spec:
+  model: gemini-2.0-flash-exp
+  instructions: |
+    You are a BigQuery executor that runs queries to manage the bq_optimizer dataset.
+    
+    Your responsibilities:
+    1. Execute BigQuery queries for fetching project data
+    2. Scan INFORMATION_SCHEMA for query discovery
+    3. Insert/update data in bq_optimizer tables
+    4. Return structured results
+    
+    IMPORTANT: Use the BigQuery client to execute queries safely.
+    Always validate inputs to prevent SQL injection.
+    Return results in structured JSON format.
+
+  input_parameters:
+    action:
+      type: string
+      description: Action to perform (fetch_queries, save_project, fetch_projects, fetch_templates)
+      required: true
+    project_id:
+      type: string
+      description: GCP project ID
+    analysis_window:
+      type: integer
+      description: Number of days to analyze
+      default: 30
+    data:
+      type: object
+      description: Additional data for insert/update operations
+
+  output_parameters:
+    success:
+      type: boolean
+      description: Whether the operation succeeded
+    data:
+      type: object
+      description: Query results or operation response
+    error:
+      type: string
+      description: Error message if operation failed
+
+  tools:
+    - python

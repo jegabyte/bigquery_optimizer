@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   FiPlus, 
@@ -12,13 +12,30 @@ import {
 import ProjectCard from '../components/projects/ProjectCard';
 import ProjectDetailView from '../components/projects/ProjectDetailView';
 import ProjectOnboarding from '../components/projects/ProjectOnboarding';
-import { mockProjects, formatCost } from '../services/projectsMockData';
+import { formatCost } from '../services/projectsMockData';
+import { projectsApiService } from '../services/projectsApiService';
 
 const Projects = () => {
-  const [projects, setProjects] = useState(mockProjects);
+  const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Fetch projects on component mount
+  useEffect(() => {
+    const fetchProjects = async () => {
+      setIsLoading(true);
+      try {
+        const data = await projectsApiService.getProjects();
+        setProjects(data);
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchProjects();
+  }, []);
 
   const handleSelectProject = (project) => {
     setSelectedProject(project);
@@ -30,21 +47,21 @@ const Projects = () => {
 
   const handleRefreshProject = async (projectId) => {
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      const updatedProjects = projects.map(p => 
-        p.id === projectId 
-          ? { ...p, lastUpdated: new Date() }
-          : p
-      );
-      setProjects(updatedProjects);
+    try {
+      await projectsApiService.refreshProject(projectId);
+      // Refresh the projects list
+      const data = await projectsApiService.getProjects();
+      setProjects(data);
       // Update selected project if it's the one being refreshed
       if (selectedProject?.id === projectId) {
-        const updatedProject = updatedProjects.find(p => p.id === projectId);
+        const updatedProject = data.find(p => p.id === projectId);
         setSelectedProject(updatedProject);
       }
+    } catch (error) {
+      console.error('Failed to refresh project:', error);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const handleEditProject = (projectId) => {
@@ -113,17 +130,6 @@ const Projects = () => {
   // Otherwise show the projects overview
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Warning Banner */}
-      <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex items-center">
-            <FiAlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-            <p className="ml-3 text-sm font-medium text-yellow-800 dark:text-yellow-300">
-              This is a mock page with sample data. The actual implementation is yet to be completed.
-            </p>
-          </div>
-        </div>
-      </div>
 
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -139,7 +145,17 @@ const Projects = () => {
             </div>
             <div className="flex items-center space-x-3">
               <button
-                onClick={() => window.location.reload()}
+                onClick={async () => {
+                  setIsLoading(true);
+                  try {
+                    const data = await projectsApiService.getProjects();
+                    setProjects(data);
+                  } catch (error) {
+                    console.error('Failed to refresh projects:', error);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
                 className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
               >
                 <FiRefreshCw className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />

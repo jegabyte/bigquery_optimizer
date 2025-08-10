@@ -1,19 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FiArrowRight, FiTrendingUp, FiAlertCircle, FiDollarSign, FiClock } from 'react-icons/fi';
+import { FiArrowRight, FiTrendingUp, FiAlertCircle, FiDollarSign, FiClock, FiDatabase, FiActivity, FiZap } from 'react-icons/fi';
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { projects, analyses, queryHistory, dashboardStats, initializeWithMockData } from '../services/database';
-import { mockOptimizationService } from '../services/mockData';
+import { dashboardApiService } from '../services/dashboardApiService';
+import { projectsApiService } from '../services/projectsApiService';
 
 const Dashboard = () => {
-  const [projectList, setProjectList] = useState([]);
-  const [recentQueries, setRecentQueries] = useState([]);
-  const [stats, setStats] = useState({
-    totalQueries: 0,
-    totalSavings: 0,
-    avgOptimizationTime: 0,
-    topIssues: []
+  const [dashboardData, setDashboardData] = useState({
+    stats: {
+      total_projects: 0,
+      total_templates: 0,
+      total_query_runs: 0,
+      total_tb_processed: 0,
+      avg_runtime_seconds: 0,
+      total_cost_estimate: 0
+    },
+    recent_templates: [],
+    top_cost_drivers: []
   });
+  const [projectList, setProjectList] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,41 +27,14 @@ const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      // Initialize with mock data if empty
-      await initializeWithMockData();
+      // Load real BigQuery data
+      const [dashStats, projectsData] = await Promise.all([
+        dashboardApiService.getDashboardStats(),
+        projectsApiService.getProjects()
+      ]);
       
-      // Load projects
-      const projectsData = await projects.getAll();
+      setDashboardData(dashStats);
       setProjectList(projectsData);
-      
-      // Load analyses for recent queries
-      const analysesData = await analyses.getAll();
-      
-      // Calculate and update dashboard stats
-      const calculatedStats = await dashboardStats.calculateStats();
-      await dashboardStats.update(calculatedStats);
-      
-      // Format recent queries for display
-      const formattedQueries = analysesData.slice(0, 5).map(analysis => ({
-        id: analysis.id,
-        query: analysis.query || analysis.originalQuery || 'N/A',
-        projectName: 'Default Project',
-        issues: analysis.issues?.length || 0,
-        costSavings: analysis.validationResult?.costSavings || 0,
-        timestamp: new Date(analysis.createdAt).toLocaleString()
-      }));
-      
-      setRecentQueries(formattedQueries);
-      
-      // Set stats for display
-      setStats({
-        totalQueries: calculatedStats.totalQueries,
-        issuesFound: analysesData.reduce((sum, a) => sum + (a.issues?.length || 0), 0),
-        avgCostSavings: calculatedStats.totalQueries > 0 
-          ? (calculatedStats.totalSavings / calculatedStats.totalQueries).toFixed(1)
-          : 0,
-        avgProcessingTime: calculatedStats.avgOptimizationTime.toFixed(1)
-      });
       
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -77,32 +55,32 @@ const Dashboard = () => {
 
   const statsDisplay = [
     { 
-      label: 'Total Queries', 
-      value: stats.totalQueries.toString(), 
-      icon: FiTrendingUp, 
+      label: 'Total Projects', 
+      value: dashboardData.stats.total_projects.toString(), 
+      icon: FiDatabase, 
       color: 'text-green-600', 
       bgColor: 'bg-green-100' 
     },
     { 
-      label: 'Issues Found', 
-      value: stats.issuesFound?.toString() || '0', 
-      icon: FiAlertCircle, 
-      color: 'text-yellow-600', 
-      bgColor: 'bg-yellow-100' 
-    },
-    { 
-      label: 'Avg Cost Savings', 
-      value: `${stats.avgCostSavings}%`, 
-      icon: FiDollarSign, 
+      label: 'Query Templates', 
+      value: dashboardData.stats.total_templates.toString(), 
+      icon: FiActivity, 
       color: 'text-blue-600', 
       bgColor: 'bg-blue-100' 
     },
     { 
-      label: 'Avg Processing Time', 
-      value: `${stats.avgProcessingTime}s`, 
-      icon: FiClock, 
+      label: 'Total Query Runs', 
+      value: dashboardData.stats.total_query_runs.toLocaleString(), 
+      icon: FiZap, 
       color: 'text-purple-600', 
       bgColor: 'bg-purple-100' 
+    },
+    { 
+      label: 'Estimated Cost', 
+      value: `$${dashboardData.stats.total_cost_estimate.toFixed(2)}`, 
+      icon: FiDollarSign, 
+      color: 'text-yellow-600', 
+      bgColor: 'bg-yellow-100' 
     },
   ];
 
@@ -177,50 +155,61 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="card">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Query Analysis</h2>
-          <Link to="/query-analysis" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
-            Analyze New Query <FiArrowRight className="inline ml-1" />
-          </Link>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Recent Query Templates</h2>
+            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+              View All <FiArrowRight className="inline ml-1" />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {dashboardData.recent_templates.length === 0 ? (
+              <p className="text-sm text-gray-500">No query templates found.</p>
+            ) : (
+              dashboardData.recent_templates.slice(0, 5).map((template) => (
+                <div key={template.template_id} className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-mono text-gray-800 truncate">{template.sql_snippet}</p>
+                  <div className="flex justify-between mt-2 text-xs text-gray-600">
+                    <span>{template.total_runs} runs</span>
+                    <span>{template.gb_processed.toFixed(2)} GB</span>
+                    <span>{new Date(template.last_seen).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          {recentQueries.length === 0 ? (
-            <p className="text-sm text-gray-500 py-4">No queries analyzed yet. Start by analyzing a query.</p>
-          ) : (
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Query</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Project</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Issues</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Cost Savings</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentQueries.map((query) => (
-                  <tr key={query.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 text-sm text-gray-900 font-mono max-w-xs truncate">
-                      {query.query}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-600">{query.projectName}</td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        query.issues === 0 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {query.issues} issues
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-900">
-                      {query.costSavings > 0 ? `${query.costSavings.toFixed(0)}%` : '-'}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-500">{query.timestamp}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Top Cost Drivers</h2>
+            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+              Optimize <FiArrowRight className="inline ml-1" />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {dashboardData.top_cost_drivers.length === 0 ? (
+              <p className="text-sm text-gray-500">No cost analysis available.</p>
+            ) : (
+              dashboardData.top_cost_drivers.map((driver) => (
+                <div key={driver.template_id} className="p-3 bg-red-50 rounded-lg">
+                  <p className="text-sm font-mono text-gray-800 truncate">{driver.sql_snippet}</p>
+                  <div className="flex justify-between mt-2">
+                    <span className="text-xs text-gray-600">{driver.total_runs} runs</span>
+                    <span className="text-sm font-semibold text-red-600">
+                      ${driver.estimated_cost.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xs text-gray-500">
+                      {driver.tb_processed.toFixed(3)} TB processed
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

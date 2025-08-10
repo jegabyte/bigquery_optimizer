@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
     "@monaco-editor/react": "^4.6.0",
     "axios": "^1.6.2",
     "clsx": "^2.0.0",
