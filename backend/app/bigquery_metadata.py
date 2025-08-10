@@ -4,7 +4,7 @@ BigQuery Metadata Tool for fetching actual table statistics
 
 import os
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 import logging
@@ -495,5 +495,100 @@ def fetch_tables_metadata(table_paths: list[str]) -> str:
         "tables": metadata_list,
         "summary": f"Found {len(table_paths)} table(s) totaling {round(total_size_gb, 2)}GB with {total_rows:,} rows"
     }
+    
+    return json.dumps(result, indent=2)
+
+def format_bytes(bytes_value: int) -> str:
+    """Format bytes into human-readable string"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
+        if bytes_value < 1024.0:
+            return f"{bytes_value:.2f} {unit}"
+        bytes_value /= 1024.0
+    return f"{bytes_value:.2f} PB"
+
+def calculate_cost(bytes_processed: int, price_per_tb: float = 5.0) -> float:
+    """
+    Calculate BigQuery query cost based on bytes processed
+    Default pricing: $5 per TB for on-demand queries
+    """
+    tb_processed = bytes_processed / (1024 ** 4)  # Convert bytes to TB
+    cost = tb_processed * price_per_tb
+    return round(cost, 6)  # Round to 6 decimal places for precision
+
+def bigquery_dry_run(query: str, project_id: Optional[str] = None) -> str:
+    """
+    Performs BigQuery dry run to validate query and estimate costs
+    
+    Args:
+        query: SQL query to validate
+        project_id: Optional project ID (uses default if not provided)
+    
+    Returns:
+        JSON string with validation results including:
+        - valid: Whether query is syntactically valid
+        - bytes_processed: Estimated bytes to be processed
+        - bytes_processed_formatted: Human-readable format
+        - estimated_cost_usd: Estimated cost in USD
+        - referenced_tables: List of tables referenced
+        - statement_type: Type of SQL statement
+        - error_message: Error details if invalid
+    """
+    import json
+    
+    # Use provided project_id or fall back to environment variable
+    if not project_id:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3")
+    
+    try:
+        # Create BigQuery client
+        client = bigquery.Client(project=project_id)
+        
+        # Configure for dry run (no actual query execution)
+        # use_query_cache=False ensures we get accurate cost estimates
+        job_config = bigquery.QueryJobConfig(
+            dry_run=True,
+            use_query_cache=False
+        )
+        
+        # Perform dry run
+        query_job = client.query(query, job_config=job_config)
+        
+        # Extract table references
+        referenced_tables = []
+        if query_job.referenced_tables:
+            referenced_tables = [
+                f"{table.project}.{table.dataset_id}.{table.table_id}"
+                for table in query_job.referenced_tables
+            ]
+        
+        # Build successful response
+        result = {
+            "valid": True,
+            "bytes_processed": query_job.total_bytes_processed or 0,
+            "bytes_processed_formatted": format_bytes(query_job.total_bytes_processed or 0),
+            "estimated_cost_usd": calculate_cost(query_job.total_bytes_processed or 0),
+            "referenced_tables": referenced_tables,
+            "statement_type": query_job.statement_type if hasattr(query_job, 'statement_type') else "UNKNOWN",
+            "uses_legacy_sql": query_job.uses_legacy_sql if hasattr(query_job, 'uses_legacy_sql') else False,
+            "error_message": None
+        }
+        
+        logger.info(f"Dry run successful: {result['bytes_processed_formatted']} = ${result['estimated_cost_usd']}")
+        
+    except Exception as e:
+        # Build error response
+        error_msg = str(e)
+        logger.error(f"Dry run failed: {error_msg}")
+        
+        result = {
+            "valid": False,
+            "bytes_processed": 0,
+            "bytes_processed_formatted": "0 B",
+            "estimated_cost_usd": 0.0,
+            "referenced_tables": [],
+            "statement_type": "UNKNOWN",
+            "uses_legacy_sql": False,
+            "error_message": error_msg
+        }
     
     return json.dumps(result, indent=2)

@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
-from app.tools.bigquery_metadata import fetch_tables_metadata
-from app.agents.callbacks import create_streaming_callback
+from app.bigquery_metadata import fetch_tables_metadata, bigquery_dry_run
+from app.callbacks import create_streaming_callback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,16 +23,16 @@ LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 DATASET = os.getenv("BIGQUERY_DATASET", "analytics")
 
 # --- Load Rules ---
-def load_rules():
-    """Load rules from config/rules.yaml"""
-    rules_path = os.path.join(os.path.dirname(__file__), 'config', 'rules.yaml')
+def load_bq_anti_patterns():
+    """Load BigQuery anti-patterns from bq_anti_patterns.yaml"""
+    patterns_path = os.path.join(os.path.dirname(__file__), 'bq_anti_patterns.yaml')
     try:
-        with open(rules_path, 'r') as f:
-            rules_content = f.read()
-        logger.info(f"✅ Loaded rules from {rules_path}")
-        return rules_content
+        with open(patterns_path, 'r') as f:
+            patterns_content = f.read()
+        logger.info(f"✅ Loaded BigQuery anti-patterns from {patterns_path}")
+        return patterns_content
     except Exception as e:
-        logger.error(f"❌ Failed to load rules: {e}")
+        logger.error(f"❌ Failed to load BigQuery anti-patterns: {e}")
         # Return default rules if file not found
         return """
 version: 2
@@ -45,10 +45,11 @@ rules:
     fix: "Select only required columns."
 """
 
-RULES_YAML = load_rules()
+BQ_ANTI_PATTERNS = load_bq_anti_patterns()
 
-# --- Tool Definition ---
+# --- Tool Definitions ---
 fetch_metadata_tool = FunctionTool(fetch_tables_metadata)
+dry_run_tool = FunctionTool(bigquery_dry_run)
 
 # --- Agent Definitions ---
 
@@ -153,7 +154,7 @@ metadata_extractor = LlmAgent(
 rule_checker = LlmAgent(
     name="rule_checker",
     model="gemini-2.5-flash",
-    description="Checks query against optimization rules using rules.yaml",
+    description="Checks query against BigQuery anti-patterns from bq_anti_patterns.yaml",
     instruction=f"""
 You are a BigQuery SQL anti-pattern checker.
 
@@ -173,7 +174,7 @@ Use the Metadata to understand table partitioning, clustering, sizes, and types.
 Report findings as STRICT JSON only (no markdown, no explanations, no code fences).
 
 Constraints:
-- Map rule severities from rules.yaml → output levels:
+- Map rule severities from bq_anti_patterns.yaml → output levels:
   error → "high", warning → "medium", info → "low".
 - "rules_checked" = number of enabled rules supplied (22).
 - "violations_found" = count of rules that FAILED.
@@ -188,8 +189,8 @@ When assessing impact, use actual metadata:
 - If a table is partitioned but filter is missing, say "Full scan on partitioned table (X GB)"
 - If a view references large underlying tables, consider their sizes
 
-# Rules (from rules.yaml):
-{RULES_YAML}
+# BigQuery Anti-Patterns (from bq_anti_patterns.yaml):
+{BQ_ANTI_PATTERNS}
 
 # Output (STRICT JSON; EXACT schema)
 {{
@@ -219,47 +220,91 @@ Use the metadata from metadata_output to provide specific, quantified impacts.
 query_optimizer = LlmAgent(
     name="query_optimizer",
     model="gemini-2.5-flash",
-    description="Applies optimizations step by step",
-    instruction="""
-    You are the Query Optimization Agent. Fix the violations found and optimize the query.
+    description="Applies optimizations step by step with validation",
+    tools=[dry_run_tool],  # Add dry_run tool for query validation
+    instruction=f"""
+    You are the Query Optimization Agent. Fix violations and optimize the query with ACTUAL validation.
     
     You will receive:
     1. The original SQL query
     2. "metadata_output" - Table metadata (sizes, partitioning, clustering) from metadata_extractor
     3. "rules_output" - Violations and compliance information from rule_checker
     
-    Parse the rules_output to understand what violations need to be fixed.
-    Use the metadata_output to calculate realistic improvements based on actual table sizes.
+    IMPORTANT: Use the bigquery_dry_run tool to validate queries and get ACTUAL cost estimates.
     
-    Apply optimizations step by step:
-    1. Fix each violation identified in rules_output
-    2. Show the query after each optimization
-    3. Calculate realistic improvement based on metadata (actual GB/TB saved)
+    Follow this process:
+    1. First, run dry_run on the ORIGINAL query to get baseline metrics
+    2. Parse the rules_output to understand what violations need to be fixed
+    3. Apply optimizations step by step
+    4. After EACH optimization, run dry_run to validate and get actual metrics
+    5. Compare actual bytes_processed between original and optimized
+    
+    When calling bigquery_dry_run:
+    - Pass the query as the first parameter
+    - Pass project_id="{PROJECT_ID}" as the second parameter
+    Example: bigquery_dry_run(query="SELECT ...", project_id="{PROJECT_ID}")
     
     Your response must be ONLY valid JSON in this exact format:
-    {
+    {{
         "original_query": "SELECT * FROM table",
+        "original_validation": {{
+            "bytes_processed": 5000000000,
+            "bytes_formatted": "5.00 GB",
+            "estimated_cost_usd": 0.025,
+            "valid": true
+        }},
         "total_optimizations": 3,
         "steps": [
-            {
+            {{
                 "step": 1,
                 "optimization": "Replace SELECT * with specific columns",
                 "query_after": "SELECT id, timestamp, user_id FROM table",
-                "improvement": "40% less data scanned",
-                "bytes_saved": "500GB"
-            },
-            {
+                "validation": {{
+                    "bytes_processed": 3000000000,
+                    "bytes_formatted": "3.00 GB",
+                    "estimated_cost_usd": 0.015,
+                    "valid": true
+                }},
+                "actual_improvement": {{
+                    "bytes_saved": 2000000000,
+                    "bytes_saved_formatted": "2.00 GB",
+                    "cost_saved_usd": 0.010,
+                    "percentage_reduction": 40
+                }}
+            }},
+            {{
                 "step": 2,
                 "optimization": "Add partition filter",
                 "query_after": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= '2024-01-01'",
-                "improvement": "95% less data scanned",
-                "bytes_saved": "1.1TB"
-            }
+                "validation": {{
+                    "bytes_processed": 100000000,
+                    "bytes_formatted": "100.00 MB",
+                    "estimated_cost_usd": 0.0005,
+                    "valid": true
+                }},
+                "actual_improvement": {{
+                    "bytes_saved": 4900000000,
+                    "bytes_saved_formatted": "4.90 GB",
+                    "cost_saved_usd": 0.0245,
+                    "percentage_reduction": 98
+                }}
+            }}
         ],
-        "final_query": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= '2024-01-01' LIMIT 1000",
-        "total_improvement": "99% reduction in data scanned",
-        "summary": "Query optimized from scanning 1.25TB to just 12.5GB"
-    }
+        "final_query": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= '2024-01-01'",
+        "final_validation": {{
+            "bytes_processed": 100000000,
+            "bytes_formatted": "100.00 MB",
+            "estimated_cost_usd": 0.0005,
+            "valid": true
+        }},
+        "total_actual_savings": {{
+            "bytes_saved": 4900000000,
+            "bytes_saved_formatted": "4.90 GB",
+            "cost_saved_usd": 0.0245,
+            "percentage_reduction": 98
+        }},
+        "summary": "Query validated and optimized: 5.00 GB → 100.00 MB (98% reduction, $0.0245 saved)"
+    }}
     
     CRITICAL: Output ONLY the JSON. No markdown, no explanations, no text before or after.
     Show realistic, incremental improvements based on the violations found.
@@ -364,7 +409,7 @@ streaming_orchestrator = LlmAgent(
     1. 📊 Metadata Extraction - Analyzes the query and fetches table metadata
        → Outputs: metadata_output (JSON with table info)
     
-    2. ✅ Rule Checking - Receives query + metadata_output, checks against rules.yaml
+    2. ✅ Rule Checking - Receives query + metadata_output, checks against bq_anti_patterns.yaml
        → Outputs: rules_output (JSON with violations and compliance)
     
     3. 🚀 Query Optimization - Receives query + metadata_output + rules_output, applies fixes

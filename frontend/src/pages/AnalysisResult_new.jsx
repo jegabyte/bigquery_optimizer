@@ -1173,10 +1173,38 @@ const AnalysisResult = () => {
                               <div className="font-medium text-sm">
                                 Step {step.step}: {step.optimization}
                               </div>
-                              <div className="text-xs text-green-600 mt-1">
-                                <span className="font-medium">Improvement:</span> {step.improvement}
-                              </div>
-                              {step.bytes_saved && (
+                              {/* Show old format improvement if it exists */}
+                              {step.improvement && (
+                                <div className="text-xs text-green-600 mt-1">
+                                  <span className="font-medium">Improvement:</span> {step.improvement}
+                                </div>
+                              )}
+                              
+                              {/* Show new format actual_improvement if it exists */}
+                              {step.actual_improvement && (
+                                <div className="space-y-1 mt-2">
+                                  <div className="text-xs text-green-600">
+                                    <span className="font-medium">✅ Validated Improvement:</span> {step.actual_improvement.percentage_reduction}% reduction
+                                  </div>
+                                  <div className="text-xs text-blue-600">
+                                    <span className="font-medium">💾 Data Saved:</span> {step.actual_improvement.bytes_saved_formatted}
+                                  </div>
+                                  <div className="text-xs text-purple-600">
+                                    <span className="font-medium">💰 Cost Saved:</span> ${step.actual_improvement.cost_saved_usd}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Show validation results if present */}
+                              {step.validation && (
+                                <div className="text-xs text-gray-600 mt-1 bg-blue-50 p-2 rounded">
+                                  <span className="font-medium">After this step:</span> {step.validation.bytes_formatted} processed 
+                                  (${step.validation.estimated_cost_usd})
+                                </div>
+                              )}
+                              
+                              {/* Show old format bytes_saved if present */}
+                              {step.bytes_saved && !step.actual_improvement && (
                                 <div className="text-xs text-gray-500 mt-1">
                                   <span className="font-medium">Data Saved:</span> {step.bytes_saved}
                                 </div>
@@ -1186,7 +1214,42 @@ const AnalysisResult = () => {
                         </div>
                       )}
                       
-                      {getStageData('optimization').total_improvement && (
+                      {/* Show new format total_actual_savings if available */}
+                      {getStageData('optimization').total_actual_savings && (
+                        <div className="bg-gradient-to-r from-green-50 to-blue-50 p-4 rounded-lg border border-green-200">
+                          <div className="text-sm font-bold text-green-800 mb-2">
+                            🎯 Total Validated Savings
+                          </div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-green-600">
+                                {getStageData('optimization').total_actual_savings.percentage_reduction}%
+                              </div>
+                              <div className="text-xs text-gray-600">Reduction</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-lg font-bold text-blue-600">
+                                {getStageData('optimization').total_actual_savings.bytes_saved_formatted}
+                              </div>
+                              <div className="text-xs text-gray-600">Data Saved</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-lg font-bold text-purple-600">
+                                ${getStageData('optimization').total_actual_savings.cost_saved_usd}
+                              </div>
+                              <div className="text-xs text-gray-600">Cost Saved</div>
+                            </div>
+                          </div>
+                          {getStageData('optimization').summary && (
+                            <div className="text-xs text-gray-700 mt-3 pt-3 border-t border-green-200">
+                              {getStageData('optimization').summary}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Fallback to old format if new format not available */}
+                      {!getStageData('optimization').total_actual_savings && getStageData('optimization').total_improvement && (
                         <div className="bg-green-50 p-3 rounded">
                           <div className="text-sm font-semibold text-green-700">
                             Total Improvement: {getStageData('optimization').total_improvement}
@@ -1379,37 +1442,6 @@ const AnalysisResult = () => {
             </div>
           </div>
         </motion.div>
-      )}
-
-      {/* Issues Found - Show after stages */}
-      {mode === 'view' && result && !result.error && result.issues && result.issues.length > 0 && (
-        <div className="card mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">Issues Found</h3>
-          <div className="space-y-2">
-            {result.issues.map((issue, idx) => (
-              <div key={idx} className="border-l-4 border-yellow-400 bg-yellow-50 p-3 rounded">
-                <div className="flex items-start gap-2">
-                  <FiAlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <div className="font-medium text-sm text-gray-900">{issue.type || issue.rule_id}</div>
-                    <div className="text-sm text-gray-600 mt-1">{issue.description || issue.fix}</div>
-                    {issue.impact && (
-                      <div className="text-xs text-gray-500 mt-1">Impact: {issue.impact}</div>
-                    )}
-                  </div>
-                  <span className={`px-2 py-1 text-xs font-medium rounded ${
-                    issue.severity === 'critical' ? 'bg-red-100 text-red-700' :
-                    issue.severity === 'high' ? 'bg-orange-100 text-orange-700' :
-                    issue.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {issue.severity || 'info'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* Optimization Impact */}

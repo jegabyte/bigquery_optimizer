@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from app.agents.tracing import add_trace_event, set_trace_attribute
+from app.tracing import add_trace_event, set_trace_attribute
 
 def create_streaming_callback(agent_name: str, stage_message: str, output_key: str):
     """Creates a streaming callback for a specific agent with enhanced logging and tracing"""
