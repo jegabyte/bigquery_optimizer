@@ -19,14 +19,14 @@ const Layout = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <nav className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center">
               <div className="flex items-center space-x-2">
                 <FiDatabase className="h-8 w-8 text-primary-600" />
-                <span className="text-xl font-semibold text-gray-900">BigQuery Optimizer</span>
+                <span className="text-xl font-semibold text-gray-900">BigQuery Optimization Engine</span>
               </div>
               <div className="hidden md:ml-10 md:flex md:space-x-4">
                 {navItems.map((item) => (
@@ -60,9 +60,16 @@ const Layout = () => {
           </div>
         </div>
       </nav>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         <Outlet />
       </main>
+      <footer className="bg-white border-t border-gray-200 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <p className="text-center text-xs text-gray-400">
+            Developed and maintained by <a href="mailto:jegadesh@google.com" className="text-blue-600 hover:text-blue-700 transition-colors">jegadesh@</a>
+          </p>
+        </div>
+      </footer>
     </div>
   );
 };

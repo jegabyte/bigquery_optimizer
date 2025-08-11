@@ -28,23 +28,24 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-blue-100 flex items-center justify-center px-4">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <div className="flex justify-center mb-8">
-            <div className="bg-primary-100 p-4 rounded-full">
-              <FiDatabase className="h-12 w-12 text-primary-600" />
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-blue-100 flex flex-col">
+      <div className="flex-1 flex items-center justify-center px-4">
+        <div className="max-w-md w-full">
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="flex justify-center mb-8">
+              <div className="bg-primary-100 p-4 rounded-full">
+                <FiDatabase className="h-12 w-12 text-primary-600" />
+              </div>
             </div>
-          </div>
-          
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-2">
-            BigQuery Optimizer
-          </h2>
-          <p className="text-center text-gray-600 mb-8">
-            Multi-Agent SQL Optimization System
-          </p>
-          
-          <form onSubmit={handleSubmit} className="space-y-6">
+            
+            <h2 className="text-3xl font-bold text-center text-gray-900 mb-2">
+              BigQuery Optimization Engine
+            </h2>
+            <p className="text-center text-gray-600 mb-8">
+              Multi-Agent SQL Optimization System
+            </p>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Username
@@ -106,9 +107,15 @@ const Login = () => {
               <p className="text-sm text-blue-700">Username: admin</p>
               <p className="text-sm text-blue-700">Password: bigquery123</p>
             </div>
-          </form>
+            </form>
+          </div>
         </div>
       </div>
+      <footer className="py-3">
+        <p className="text-center text-xs text-gray-500">
+          Developed and maintained by <a href="mailto:jegadesh@google.com" className="text-blue-600 hover:text-blue-700 transition-colors">jegadesh@</a>
+        </p>
+      </footer>
     </div>
   );
 };
