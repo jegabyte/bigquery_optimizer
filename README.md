@@ -64,23 +64,40 @@ gcloud services enable aiplatform.googleapis.com
 gcloud services enable bigquery.googleapis.com
 ```
 
-### 3. Start All Services
+### 3. Start All Services Locally
+
+#### Option 1: Run all services with single command (Recommended)
 
 ```bash
 # Run the deployment script for local development
 ./deploy.sh local
 ```
 
-This will:
+This will automatically:
 1. Start the ADK backend on port 8000
-2. Start the React frontend on port 3000/5173
-3. Enable CORS for local development
+2. Start the BQ API service on port 8001
+3. Start the React frontend on port 3000/5173
+4. Enable CORS for local development
+
+#### Option 2: Run services individually (for debugging)
+
+```bash
+# Terminal 1 - Backend ADK Service
+cd backend && source .venv/bin/activate && adk api_server app --port 8000
+
+# Terminal 2 - BQ API Service
+cd bq-api && python main_firestore.py
+
+# Terminal 3 - Frontend
+cd frontend && npm run dev
+```
 
 ### 4. Access the Application
 
 - **Frontend**: http://localhost:3000 or http://localhost:5173
 - **Backend API**: http://localhost:8000/docs
 - **ADK UI**: http://localhost:8000/app/
+- **BQ API**: http://localhost:8001/docs
 
 **Login Credentials:**
 - Username: `admin`

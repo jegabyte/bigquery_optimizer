@@ -105,20 +105,17 @@ deploy_bq_api() {
     print_info "Building and deploying BQ API with Firestore integration..."
     print_info "This service uses Firestore database for storing projects, templates, and analyses"
     
-    # Build and push Docker image
-    docker build -t gcr.io/${PROJECT_ID}/${BQ_API_SERVICE} .
-    docker push gcr.io/${PROJECT_ID}/${BQ_API_SERVICE}
-    
-    # Deploy to Cloud Run with Firestore environment variables
+    # Deploy directly using Cloud Build (more reliable than local Docker)
     gcloud run deploy ${BQ_API_SERVICE} \
-        --image gcr.io/${PROJECT_ID}/${BQ_API_SERVICE} \
+        --source . \
         --platform managed \
         --region ${REGION} \
         --allow-unauthenticated \
         --set-env-vars BQ_PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID} \
         --memory 512Mi \
         --timeout 60 \
-        --max-instances 10
+        --max-instances 10 \
+        --port 8001
     
     BQ_API_URL=$(gcloud run services describe $BQ_API_SERVICE \
         --region=$REGION \
