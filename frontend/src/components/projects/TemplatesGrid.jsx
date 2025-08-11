@@ -14,7 +14,7 @@ import {
 } from 'react-icons/fi';
 import { formatBytes, formatCost, formatRuntime } from '../../services/projectsMockData';
 
-const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
+const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemplates = new Set(), analysisStatuses = {} }) => {
   const [selectedTemplates, setSelectedTemplates] = useState(new Set());
   const [sortBy, setSortBy] = useState('bytesProcessedP90');
   const [sortOrder, setSortOrder] = useState('desc');
@@ -118,12 +118,21 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
       <FiChevronDown className="h-3 w-3" />;
   };
 
+  // Calculate costs for each template
+  const getQueryCost = (bytesProcessed) => {
+    return (bytesProcessed / 1e12) * 5.00; // $5 per TB
+  };
+
+  const getTotalCost = (bytesProcessed, runs) => {
+    return getQueryCost(bytesProcessed) * runs;
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
       {/* Header with Search and Filters */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
             Query Templates ({filteredTemplates.length})
           </h3>
           <div className="flex items-center space-x-2">
@@ -143,13 +152,13 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
 
         {/* Search Bar */}
         <div className="relative">
-          <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by SQL, table, or dataset..."
+            placeholder="Search queries..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 
@@ -240,20 +249,34 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
                 {selectedTemplates.size} template{selectedTemplates.size > 1 ? 's' : ''} selected
               </span>
               <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => onBulkAction('analyze', Array.from(selectedTemplates))}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 text-sm"
-                >
-                  <FiPlay className="h-4 w-4" />
-                  <span>Run Analysis</span>
-                </button>
-                <button
-                  onClick={() => onBulkAction('reanalyze', Array.from(selectedTemplates))}
-                  className="px-3 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex items-center space-x-2 text-sm"
-                >
-                  <FiRefreshCw className="h-4 w-4" />
-                  <span>Re-analyze</span>
-                </button>
+                {(() => {
+                  const selectedArray = Array.from(selectedTemplates);
+                  const hasAnalyzed = selectedArray.some(id => analysisStatuses[id] === 'completed');
+                  const hasUnanalyzed = selectedArray.some(id => !analysisStatuses[id] || analysisStatuses[id] === 'new' || analysisStatuses[id] === 'failed');
+                  
+                  if (hasUnanalyzed) {
+                    return (
+                      <button
+                        onClick={() => onBulkAction('analyze', selectedArray)}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 text-sm"
+                      >
+                        <FiPlay className="h-4 w-4" />
+                        <span>Run Analysis</span>
+                      </button>
+                    );
+                  } else if (hasAnalyzed) {
+                    return (
+                      <button
+                        onClick={() => onBulkAction('analyze', selectedArray)}
+                        className="px-3 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex items-center space-x-2 text-sm"
+                      >
+                        <FiRefreshCw className="h-4 w-4" />
+                        <span>Re-analyze</span>
+                      </button>
+                    );
+                  }
+                  return null;
+                })()}
                 <button
                   onClick={() => onBulkAction('snooze', Array.from(selectedTemplates))}
                   className="px-3 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex items-center space-x-2 text-sm"
@@ -273,12 +296,12 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
         )}
       </AnimatePresence>
 
-      {/* Table */}
+      {/* Compact Table */}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
             <tr>
-              <th className="px-4 py-3 text-left">
+              <th className="px-2 py-2 text-left">
                 <input
                   type="checkbox"
                   checked={selectedTemplates.size === filteredTemplates.length && filteredTemplates.length > 0}
@@ -287,7 +310,7 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
                 />
               </th>
               <th 
-                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 max-w-xs"
+                className="px-2 py-2 pr-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 w-2/5"
                 onClick={() => handleSort('sqlSnippet')}
               >
                 <div className="flex items-center space-x-1">
@@ -295,11 +318,8 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
                   <SortIcon field="sqlSnippet" />
                 </div>
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Tables Used
-              </th>
               <th 
-                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                className="px-2 py-2 pl-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('runs')}
               >
                 <div className="flex items-center space-x-1">
@@ -308,170 +328,171 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction }) => {
                 </div>
               </th>
               <th 
-                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('bytesProcessedP90')}
               >
                 <div className="flex items-center space-x-1">
-                  <span>P90 Bytes</span>
+                  <div className="flex flex-col">
+                    <span>Data Processed</span>
+                    <span className="text-gray-400 font-normal" style={{ fontSize: '9px' }}>(P90)</span>
+                  </div>
                   <SortIcon field="bytesProcessedP90" />
                 </div>
               </th>
               <th 
-                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('runtimeP50')}
               >
                 <div className="flex items-center space-x-1">
-                  <span>P50 Runtime</span>
+                  <div className="flex flex-col">
+                    <span>Avg Runtime</span>
+                    <span className="text-gray-400 font-normal" style={{ fontSize: '9px' }}>(P50)</span>
+                  </div>
                   <SortIcon field="runtimeP50" />
                 </div>
               </th>
-              <th 
-                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
-                onClick={() => handleSort('lastSeen')}
-              >
-                <div className="flex items-center space-x-1">
-                  <span>Last Seen</span>
-                  <SortIcon field="lastSeen" />
-                </div>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <span>Per Query</span>
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                State
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <span>Total Cost</span>
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Actions
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <span>Savings</span>
+              </th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <span>Action</span>
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {filteredTemplates.map((template) => (
-              <motion.tr
-                key={template.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-                onClick={() => onTemplateClick(template)}
-              >
-                <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedTemplates.has(template.id)}
-                    onChange={() => handleSelectTemplate(template.id)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                </td>
-                <td className="px-4 py-4 max-w-sm">
-                  <div className="group relative">
-                    <div>
-                      <p className="text-sm text-gray-900 dark:text-gray-100 font-mono text-xs leading-tight">
-                        {template.sqlSnippet.split(' ').slice(0, 8).join(' ')}...
-                      </p>
-                      <div className="flex items-center mt-1 space-x-2">
-                        {template.runs > 100 && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
-                            High freq
-                          </span>
-                        )}
-                        {template.state === 'new' && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                            Unanalyzed
-                          </span>
-                        )}
+            {filteredTemplates.map((template) => {
+              const queryCost = getQueryCost(template.bytesProcessedP90);
+              const totalCost = getTotalCost(template.bytesProcessedP90, template.runs);
+              const potentialSavings = totalCost * 0.3; // Assume 30% potential savings
+              
+              return (
+                <motion.tr
+                  key={template.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
+                  onClick={() => onTemplateClick(template)}
+                >
+                  <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTemplates.has(template.id)}
+                      onChange={() => handleSelectTemplate(template.id)}
+                      className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    />
+                  </td>
+                  <td className="px-2 py-2 pr-1 w-2/5">
+                    <div className="group relative">
+                      <div>
+                        <p className="text-xs text-gray-900 dark:text-gray-100 font-mono truncate">
+                          {template.sqlSnippet.substring(0, 50)}...
+                        </p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {template.tables.slice(0, 2).map((table, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                              style={{ fontSize: '9px' }}
+                            >
+                              {table.split('.').pop()}
+                            </span>
+                          ))}
+                          {template.tables.length > 2 && (
+                            <span className="text-gray-400" style={{ fontSize: '9px' }}>
+                              +{template.tables.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* Tooltip */}
+                      <div className="absolute z-10 invisible group-hover:visible bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 w-[500px] -top-2 left-0 transform -translate-y-full">
+                        <p className="text-xs text-gray-400 mb-2">Full Query Pattern:</p>
+                        <pre className="whitespace-pre-wrap font-mono text-xs text-gray-100">{template.fullSql || template.sqlSnippet}</pre>
+                        <div className="absolute bottom-0 left-6 transform translate-y-1/2 rotate-45 w-2 h-2 bg-gray-900 dark:bg-gray-800"></div>
                       </div>
                     </div>
-                    {/* Tooltip on hover */}
-                    <div className="absolute z-10 invisible group-hover:visible bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg p-3 w-[500px] -top-2 left-0 transform -translate-y-full">
-                      <p className="text-xs text-gray-400 mb-2">Full Query Pattern:</p>
-                      <pre className="whitespace-pre-wrap font-mono text-xs text-gray-100">{template.fullSql || template.sqlSnippet}</pre>
-                      <div className="absolute bottom-0 left-6 transform translate-y-1/2 rotate-45 w-2 h-2 bg-gray-900 dark:bg-gray-800"></div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-wrap gap-1">
-                    {template.tables.slice(0, 2).map((table, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
-                      >
-                        {table}
-                      </span>
-                    ))}
-                    {template.tables.length > 2 && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        +{template.tables.length - 2}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  </td>
+                  <td className="px-2 py-2 pl-1">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">
                       {template.runs.toLocaleString()}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {template.runsPerDay}/day
-                    </p>
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {template.runs > 100 && (
+                      <span className="text-red-600" style={{ fontSize: '9px' }}>High</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100">
                       {formatBytes(template.bytesProcessedP90)}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      P99: {formatBytes(template.bytesProcessedP99)}
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="text-xs text-gray-900 dark:text-gray-100">
+                      {formatRuntime(template.runtimeP50)}
                     </p>
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <p className="text-sm text-gray-900 dark:text-gray-100">
-                    {formatRuntime(template.runtimeP50)}
-                  </p>
-                </td>
-                <td className="px-4 py-4">
-                  <p className="text-sm text-gray-900 dark:text-gray-100">
-                    {template.lastSeen.toLocaleDateString()}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {template.lastSeen.toLocaleTimeString()}
-                  </p>
-                </td>
-                <td className="px-4 py-4">
-                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStateColor(template.state)}`}>
-                    {template.state}
-                  </span>
-                </td>
-                <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center space-x-2">
-                    {template.state === 'new' && (
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                      ${queryCost.toFixed(4)}
+                    </p>
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                      ${totalCost.toFixed(2)}
+                    </p>
+                  </td>
+                  <td className="px-2 py-2">
+                    {template.state === 'analyzed' ? (
+                      <p className="text-xs font-bold text-green-600">
+                        ${potentialSavings.toFixed(2)}
+                      </p>
+                    ) : (
+                      <span className="text-xs text-gray-500">-</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                    {analyzingTemplates.has(template.id) ? (
+                      <span className="inline-flex items-center px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
+                        <svg className="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span className="text-xs">Analyzing...</span>
+                      </span>
+                    ) : analysisStatuses[template.id] === 'completed' ? (
                       <button
                         onClick={() => onBulkAction('analyze', [template.id])}
-                        className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                        title="Analyze"
+                        className="inline-flex items-center px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                        title="Re-analyze Query"
                       >
-                        <FiPlay className="h-4 w-4" />
+                        <FiRefreshCw className="h-3 w-3" />
+                        <span className="ml-1 text-xs">Re-analyze</span>
                       </button>
-                    )}
-                    {template.state === 'analyzed' && (
+                    ) : template.state === 'applied' ? (
+                      <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300 rounded text-xs">
+                        <FiCheck className="h-3 w-3 mr-1" />
+                        Applied
+                      </span>
+                    ) : (
                       <button
-                        onClick={() => onBulkAction('validate', [template.id])}
-                        className="p-1 text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300"
-                        title="Validate"
+                        onClick={() => onBulkAction('analyze', [template.id])}
+                        className="inline-flex items-center px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        title="Analyze Query"
+                        disabled={analyzingTemplates.has(template.id)}
                       >
-                        <FiCheck className="h-4 w-4" />
+                        <FiPlay className="h-3 w-3" />
+                        <span className="ml-1 text-xs">Analyze</span>
                       </button>
                     )}
-                    <button
-                      onClick={() => navigator.clipboard.writeText(template.fullSql)}
-                      className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-300"
-                      title="Copy SQL"
-                    >
-                      <FiCopy className="h-4 w-4" />
-                    </button>
-                  </div>
-                </td>
-              </motion.tr>
-            ))}
+                  </td>
+                </motion.tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

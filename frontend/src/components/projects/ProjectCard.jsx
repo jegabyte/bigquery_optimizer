@@ -77,7 +77,7 @@ const ProjectCard = ({ project, onRefresh, onEdit, onRemove, onPause }) => {
       {/* Last Updated */}
       <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mb-4">
         <FiClock className="h-3 w-3 mr-1" />
-        Last updated: {project.lastUpdated.toLocaleString()}
+        Last updated: {project.lastUpdated instanceof Date ? project.lastUpdated.toLocaleString() : new Date(project.lastUpdated).toLocaleString()}
       </div>
 
       {/* Stats Grid */}

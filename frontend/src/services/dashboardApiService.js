@@ -11,16 +11,23 @@ class DashboardApiService {
   }
 
   /**
-   * Fetch dashboard statistics
+   * Fetch dashboard statistics with timeout
    */
   async getDashboardStats() {
     try {
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for dashboard
+      
       const response = await fetch(`${this.baseUrl}/api/dashboard/stats`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -29,7 +36,11 @@ class DashboardApiService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
+      if (error.name === 'AbortError') {
+        console.error('Request timeout while fetching dashboard stats');
+      } else {
+        console.error('Error fetching dashboard stats:', error);
+      }
       // Return mock data as fallback
       return this.getMockStats();
     }

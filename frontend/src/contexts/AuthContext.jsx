@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }) => {
     } else {
       return { 
         success: false, 
-        error: 'Invalid credentials. Use username: admin, password: bigquery123' 
+        error: 'Invalid credentials' 
       };
     }
   };

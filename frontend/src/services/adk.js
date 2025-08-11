@@ -721,14 +721,27 @@ function extractStructuredData(events) {
       const optimizedCost = parseFloat(summary.estimated_cost_after?.replace('$', '') || '0');
       const costSavings = originalCost > 0 ? Math.round(((originalCost - optimizedCost) / originalCost) * 100) : 0;
       
+      // Get actual bytes processed from validation results
+      const originalBytes = optimization?.original_validation?.bytes_processed || 
+                           optimization?.final_validation?.bytes_processed || 
+                           (metadata?.total_size_gb ? metadata.total_size_gb * 1e9 : 0);
+      const optimizedBytes = optimization?.final_validation?.bytes_processed || 
+                            originalBytes;
+      
+      // Calculate actual row counts from metadata
+      const originalRows = metadata?.tables?.[0]?.row_count || 
+                          metadata?.total_row_count || 
+                          0;
+      const optimizedRows = originalRows; // Same rows, just processed more efficiently
+      
       validationResult = {
         costSavings: costSavings,
-        originalCost: originalCost.toFixed(2),
-        optimizedCost: optimizedCost.toFixed(2),
-        bytesProcessedOriginal: metadata?.total_size_gb ? metadata.total_size_gb * 1e9 : 1e12,
-        bytesProcessedOptimized: metadata?.total_size_gb ? metadata.total_size_gb * 0.01 * 1e9 : 1e10,
-        estimatedRowsOriginal: metadata?.tables?.[0]?.row_count || 1000000000,
-        estimatedRowsOptimized: Math.round((metadata?.tables?.[0]?.row_count || 1000000000) * 0.01)
+        originalCost: originalCost.toFixed(4),
+        optimizedCost: optimizedCost.toFixed(4),
+        bytesProcessedOriginal: originalBytes,
+        bytesProcessedOptimized: optimizedBytes,
+        estimatedRowsOriginal: originalRows,
+        estimatedRowsOptimized: optimizedRows
       };
     }
     

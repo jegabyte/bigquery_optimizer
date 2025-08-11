@@ -18,13 +18,20 @@ import {
 import { formatBytes, formatCost, formatRuntime, getTemplateRuns } from '../../services/projectsMockData';
 import MonacoEditor from '@monaco-editor/react';
 
-const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
+const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus, analysisResult }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [runs, setRuns] = useState([]);
-  const [analysisOptions, setAnalysisOptions] = useState({
-    mode: 'rules_rewrite_validate',
-    parameters: {}
-  });
+  
+  // Debug logging
+  useEffect(() => {
+    if (isOpen && analysisResult) {
+      console.log('TemplateDetails - Analysis Result:', analysisResult);
+      console.log('Has metadata:', analysisResult?.metadata);
+      console.log('Optimization Score:', analysisResult?.metadata?.optimizationScore);
+      console.log('Has optimizedQuery:', analysisResult?.optimizedQuery);
+      console.log('Has validationResult:', analysisResult?.validationResult);
+    }
+  }, [isOpen, analysisResult]);
 
   useEffect(() => {
     if (template && isOpen) {
@@ -52,8 +59,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'runs', label: `Runs (${template.runs || 0})` },
-    { id: 'analyze', label: 'Analyze' },
-    { id: 'results', label: 'Results', disabled: !template.lastAnalysis }
+    { id: 'results', label: 'Results', disabled: !analysisResult && !template.lastAnalysis }
   ];
 
   return (
@@ -81,10 +87,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                  Template Details
+                  Query Template
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {template.runs} runs • {template.runsPerDay} runs/day
+                  {template.runs} runs
                 </p>
               </div>
               <button
@@ -248,41 +254,117 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                       Analysis Status
                     </h3>
                     <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center space-x-3">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                            template.state === 'new' ? 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' :
-                            template.state === 'analyzed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' :
-                            template.state === 'validated' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' :
-                            template.state === 'applied' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
-                            'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300'
-                          }`}>
-                            {template.state}
-                          </span>
-                          {template.complianceScore && (
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
-                              Compliance: {template.complianceScore}%
+                      {analysisStatus === 'analyzing' ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center space-x-3">
+                            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Analyzing query...
                             </span>
+                          </div>
+                          {analysisResult?.stage && (
+                            <div className="space-y-2">
+                              <div className="flex items-center space-x-2">
+                                <div className={`h-2 w-2 rounded-full ${
+                                  analysisResult.stage === 'metadata' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'
+                                }`}></div>
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
+                                  Extracting metadata
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <div className={`h-2 w-2 rounded-full ${
+                                  analysisResult.stage === 'rules' ? 'bg-blue-500 animate-pulse' : 
+                                  analysisResult.stage === 'optimization' || analysisResult.stage === 'report' ? 'bg-green-500' : 'bg-gray-300'
+                                }`}></div>
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
+                                  Checking compliance rules
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <div className={`h-2 w-2 rounded-full ${
+                                  analysisResult.stage === 'optimization' ? 'bg-blue-500 animate-pulse' : 
+                                  analysisResult.stage === 'report' ? 'bg-green-500' : 'bg-gray-300'
+                                }`}></div>
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
+                                  Optimizing query
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <div className={`h-2 w-2 rounded-full ${
+                                  analysisResult.stage === 'report' ? 'bg-green-500' : 'bg-gray-300'
+                                }`}></div>
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
+                                  Generating report
+                                </span>
+                              </div>
+                            </div>
                           )}
                         </div>
-                        {template.lastAnalysis && (
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            Last analyzed: {template.lastAnalysis.toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-
-                      {template.state === 'new' ? (
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          This template has not been analyzed yet. Run an analysis to identify optimization opportunities.
-                        </p>
+                      ) : analysisStatus === 'completed' && analysisResult ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <FiCheckCircle className="h-5 w-5 text-green-500" />
+                              <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                                Analysis Complete
+                              </span>
+                            </div>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              Just now
+                            </span>
+                          </div>
+                          {analysisResult.metadata?.optimizationScore && (
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">
+                                Compliance Score:
+                              </span>
+                              <span className="font-semibold text-gray-900 dark:text-gray-100">
+                                {analysisResult.metadata.optimizationScore}%
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => setActiveTab('results')}
+                            className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            View analysis results →
+                          </button>
+                        </div>
                       ) : (
-                        <button
-                          onClick={() => setActiveTab('results')}
-                          className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
-                          View analysis results →
-                        </button>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-3">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                              template.state === 'new' ? 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' :
+                              template.state === 'analyzed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' :
+                              template.state === 'validated' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' :
+                              template.state === 'applied' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
+                              'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300'
+                            }`}>
+                              {template.state}
+                            </span>
+                            {template.complianceScore && (
+                              <span className="text-sm text-gray-600 dark:text-gray-400">
+                                Compliance: {template.complianceScore}%
+                              </span>
+                            )}
+                          </div>
+                          {template.state === 'new' ? (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              This template has not been analyzed yet.
+                            </p>
+                          ) : (
+                            <button
+                              onClick={() => setActiveTab('results')}
+                              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                              View analysis results →
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -358,145 +440,75 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                 </div>
               )}
 
-              {/* Analyze Tab */}
-              {activeTab === 'analyze' && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                      Analysis Options
-                    </h3>
-                    <div className="space-y-3">
-                      <label className="flex items-start space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="analysisMode"
-                          value="rules_only"
-                          checked={analysisOptions.mode === 'rules_only'}
-                          onChange={(e) => setAnalysisOptions({ ...analysisOptions, mode: e.target.value })}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            Rules Only
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Identify anti-patterns and compliance issues
-                          </p>
-                        </div>
-                      </label>
-
-                      <label className="flex items-start space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="analysisMode"
-                          value="rules_rewrite"
-                          checked={analysisOptions.mode === 'rules_rewrite'}
-                          onChange={(e) => setAnalysisOptions({ ...analysisOptions, mode: e.target.value })}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            Rules + Rewrite
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Generate optimized SQL based on identified issues
-                          </p>
-                        </div>
-                      </label>
-
-                      <label className="flex items-start space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="analysisMode"
-                          value="rules_rewrite_validate"
-                          checked={analysisOptions.mode === 'rules_rewrite_validate'}
-                          onChange={(e) => setAnalysisOptions({ ...analysisOptions, mode: e.target.value })}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            Rules + Rewrite + Validate
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Full analysis with impact estimation
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                      Parameters (Optional)
-                    </h3>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                          Date Range Preset
-                        </label>
-                        <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm">
-                          <option>Last 7 days</option>
-                          <option>Last 30 days</option>
-                          <option>Month to date</option>
-                          <option>Custom range</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => onAnalyze(template.id, analysisOptions)}
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
-                  >
-                    <FiPlay className="h-5 w-5" />
-                    <span>Run Analysis</span>
-                  </button>
-                </div>
-              )}
-
               {/* Results Tab */}
-              {activeTab === 'results' && template.lastAnalysis && (
+              {activeTab === 'results' && analysisResult && (
                 <div className="space-y-6">
-                  {/* Compliance Score */}
-                  {template.complianceScore && (
-                    <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                        Compliance Score
-                      </h3>
-                      <div className="flex items-center space-x-4">
-                        <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                          {template.complianceScore}%
+                  {/* Analysis Summary */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg p-4">
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Analysis Summary
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {analysisResult.metadata?.optimizationScore && (
+                        <div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">Compliance Score</p>
+                          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                            {analysisResult.metadata.optimizationScore}%
+                          </p>
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {template.issues.length} issues found
+                      )}
+                      {analysisResult.issues && (
+                        <div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">Issues Found</p>
+                          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                            {analysisResult.issues.length}
+                          </p>
                         </div>
-                      </div>
+                      )}
+                      {analysisResult.validationResult?.costSavings && (
+                        <div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">Cost Savings</p>
+                          <p className="text-xl font-bold text-green-600 dark:text-green-400">
+                            {analysisResult.validationResult.costSavings}%
+                          </p>
+                        </div>
+                      )}
+                      {analysisResult.metadata?.optimizationTime && (
+                        <div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">Analysis Time</p>
+                          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                            {analysisResult.metadata.optimizationTime.toFixed(1)}s
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
 
-                  {/* Issues */}
-                  {template.issues && template.issues.length > 0 && (
+                  {/* Issues from Analysis */}
+                  {analysisResult.issues && analysisResult.issues.length > 0 && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                         Identified Issues
                       </h3>
                       <div className="space-y-2">
-                        {template.issues.map((issue, idx) => (
+                        {analysisResult.issues.map((issue, idx) => (
                           <div
                             key={idx}
                             className="flex items-start space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg"
                           >
-                            {getSeverityIcon(issue.severity)}
+                            {getSeverityIcon(issue.severity || 'low')}
                             <div className="flex-1">
                               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {issue.rule}
+                                {issue.type || issue.rule}
                               </p>
                               <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                 {issue.description}
                               </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                                Impact: {issue.impact}
-                              </p>
+                              {issue.impact && (
+                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                  Impact: {issue.impact}
+                                </p>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -505,7 +517,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                   )}
 
                   {/* Optimized SQL */}
-                  {template.optimizedSql && (
+                  {analysisResult.optimizedQuery && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                         Optimized SQL
@@ -515,7 +527,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                           height="300px"
                           language="sql"
                           theme={document.documentElement.classList.contains('dark') ? 'vs-dark' : 'light'}
-                          value={template.optimizedSql}
+                          value={analysisResult.optimizedQuery}
                           options={{
                             readOnly: true,
                             minimap: { enabled: false },
@@ -526,45 +538,73 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze }) => {
                       </div>
                       <div className="flex items-center space-x-2 mt-2">
                         <button
-                          onClick={() => navigator.clipboard.writeText(template.optimizedSql)}
+                          onClick={() => navigator.clipboard.writeText(analysisResult.optimizedQuery)}
                           className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
                         >
                           <FiCopy className="h-4 w-4" />
                           <span>Copy Optimized SQL</span>
                         </button>
-                        <button className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2">
-                          <FiDownload className="h-4 w-4" />
-                          <span>Download</span>
-                        </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Impact Estimate */}
-                  {template.estimatedSavings && (
+                  {/* Cost Impact Estimation */}
+                  {analysisResult.validationResult && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                        Estimated Impact
+                        Cost Impact Estimation
                       </h3>
                       <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div>
-                            <p className="text-xs text-green-600 dark:text-green-400">Before</p>
+                            <p className="text-xs text-green-600 dark:text-green-400">Original Cost</p>
                             <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                              {formatCost(template.estimatedSavings.before)}
+                              ${(() => {
+                                const cost = analysisResult.metadata?.stages?.optimization?.original_validation?.estimated_cost_usd ||
+                                            Number(analysisResult.validationResult.originalCost) || 0;
+                                return cost < 1 ? cost.toFixed(6) : cost.toFixed(4);
+                              })()}
                             </p>
+                            <p className="text-xs text-gray-500 mt-1">per query</p>
                           </div>
                           <div>
-                            <p className="text-xs text-green-600 dark:text-green-400">After</p>
+                            <p className="text-xs text-green-600 dark:text-green-400">Optimized Cost</p>
                             <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                              {formatCost(template.estimatedSavings.after)}
+                              ${(() => {
+                                const cost = analysisResult.metadata?.stages?.optimization?.final_validation?.estimated_cost_usd ||
+                                            Number(analysisResult.validationResult.optimizedCost) || 0;
+                                return cost < 1 ? cost.toFixed(6) : cost.toFixed(4);
+                              })()}
                             </p>
+                            <p className="text-xs text-gray-500 mt-1">per query</p>
                           </div>
                           <div>
-                            <p className="text-xs text-green-600 dark:text-green-400">Reduction</p>
+                            <p className="text-xs text-green-600 dark:text-green-400">Savings</p>
                             <p className="text-lg font-semibold text-green-600 dark:text-green-400">
-                              {template.estimatedSavings.reduction}%
+                              {(() => {
+                                const original = analysisResult.metadata?.stages?.optimization?.original_validation?.estimated_cost_usd ||
+                                               Number(analysisResult.validationResult.originalCost) || 0;
+                                const optimized = analysisResult.metadata?.stages?.optimization?.final_validation?.estimated_cost_usd ||
+                                                Number(analysisResult.validationResult.optimizedCost) || 0;
+                                const savings = original > 0 ? Math.round(((original - optimized) / original) * 100) : 0;
+                                return savings;
+                              })()}%
                             </p>
+                            <p className="text-xs text-gray-500 mt-1">reduction</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-green-600 dark:text-green-400">Monthly Savings</p>
+                            <p className="text-lg font-semibold text-green-600 dark:text-green-400">
+                              ${(() => {
+                                const original = analysisResult.metadata?.stages?.optimization?.original_validation?.estimated_cost_usd ||
+                                               Number(analysisResult.validationResult.originalCost) || 0;
+                                const optimized = analysisResult.metadata?.stages?.optimization?.final_validation?.estimated_cost_usd ||
+                                                Number(analysisResult.validationResult.optimizedCost) || 0;
+                                const monthlySavings = (original - optimized) * template.runs * 30 / (template.analysisWindow || 30);
+                                return monthlySavings < 0.01 ? monthlySavings.toFixed(6) : monthlySavings.toFixed(2);
+                              })()}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">estimated</p>
                           </div>
                         </div>
                       </div>

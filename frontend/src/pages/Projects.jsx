@@ -20,7 +20,8 @@ const Projects = () => {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Fetch projects on component mount
   useEffect(() => {
@@ -47,7 +48,7 @@ const Projects = () => {
   };
 
   const handleRefreshProject = async (projectId) => {
-    setIsLoading(true);
+    setIsRefreshing(true);
     try {
       await projectsApiService.refreshProject(projectId);
       // Refresh the projects list
@@ -61,7 +62,7 @@ const Projects = () => {
     } catch (error) {
       console.error('Failed to refresh project:', error);
     } finally {
-      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -164,39 +165,39 @@ const Projects = () => {
 
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                Projects & Jobs
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                Project Analysis
               </h1>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Bulk optimization for your BigQuery workloads
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Analyze all queries in the project using INFORMATION_SCHEMA.JOBS_BY_PROJECT
               </p>
             </div>
             <div className="flex items-center space-x-3">
               <button
                 onClick={async () => {
-                  setIsLoading(true);
+                  setIsRefreshing(true);
                   try {
                     const data = await projectsApiService.getProjects();
                     setProjects(data);
                   } catch (error) {
                     console.error('Failed to refresh projects:', error);
                   } finally {
-                    setIsLoading(false);
+                    setIsRefreshing(false);
                   }
                 }}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
+                className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-1.5"
               >
-                <FiRefreshCw className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+                <FiRefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                 <span>Refresh All</span>
               </button>
               <button
                 onClick={() => setIsOnboardingOpen(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-1.5"
               >
-                <FiPlus className="h-5 w-5" />
+                <FiPlus className="h-4 w-4" />
                 <span>Add Project</span>
               </button>
             </div>
@@ -205,24 +206,28 @@ const Projects = () => {
       </div>
 
       {/* Summary Stats */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-4 gap-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="grid grid-cols-4 gap-3">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   Query Templates
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">
-                  {totals.templates.toLocaleString()}
-                </p>
+                {isLoading ? (
+                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
+                ) : (
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {totals.templates.toLocaleString()}
+                  </p>
+                )}
               </div>
-              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                <FiActivity className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                <FiActivity className="h-5 w-5 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
           </motion.div>
@@ -231,19 +236,23 @@ const Projects = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   Total Runs
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">
-                  {totals.runs.toLocaleString()}
-                </p>
+                {isLoading ? (
+                  <div className="h-7 w-20 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
+                ) : (
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {totals.runs.toLocaleString()}
+                  </p>
+                )}
               </div>
-              <div className="p-3 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
-                <FiBarChart2 className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+                <FiBarChart2 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
               </div>
             </div>
           </motion.div>
@@ -252,19 +261,23 @@ const Projects = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   Monthly Spend
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">
-                  {formatCost(totals.spend)}
-                </p>
+                {isLoading ? (
+                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
+                ) : (
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {formatCost(totals.spend)}
+                  </p>
+                )}
               </div>
-              <div className="p-3 bg-red-50 dark:bg-red-950/30 rounded-lg">
-                <FiDollarSign className="h-6 w-6 text-red-600 dark:text-red-400" />
+              <div className="p-2 bg-red-50 dark:bg-red-950/30 rounded-lg">
+                <FiDollarSign className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
             </div>
           </motion.div>
@@ -273,19 +286,23 @@ const Projects = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   Potential Savings
                 </p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-2">
-                  {formatCost(totals.savings)}
-                </p>
+                {isLoading ? (
+                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
+                ) : (
+                  <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
+                    {formatCost(totals.savings)}
+                  </p>
+                )}
               </div>
-              <div className="p-3 bg-green-50 dark:bg-green-950/30 rounded-lg">
-                <FiCheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+              <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                <FiCheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
               </div>
             </div>
           </motion.div>
@@ -293,15 +310,25 @@ const Projects = () => {
       </div>
 
       {/* Projects Grid */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-6">
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+        <div className="mb-3">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
             Integrated Projects ({projects.length})
           </h2>
         </div>
         
-        {projects.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {isLoading ? (
+          // Loading state with animation
+          <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-col items-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400"></div>
+              <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
+                Loading projects...
+              </p>
+            </div>
+          </div>
+        ) : projects.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {projects.map((project) => (
               <div
                 key={project.id}
@@ -319,19 +346,19 @@ const Projects = () => {
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-            <FiActivity className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-gray-100">
+          <div className="text-center py-8 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <FiActivity className="mx-auto h-10 w-10 text-gray-400" />
+            <h3 className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">
               No projects integrated yet
             </h3>
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
               Get started by adding your first GCP project to discover and optimize query templates.
             </p>
             <button
               onClick={() => setIsOnboardingOpen(true)}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center space-x-2"
+              className="mt-3 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center space-x-1.5"
             >
-              <FiPlus className="h-5 w-5" />
+              <FiPlus className="h-4 w-4" />
               <span>Add Your First Project</span>
             </button>
           </div>

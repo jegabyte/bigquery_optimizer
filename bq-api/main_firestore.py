@@ -3,7 +3,7 @@ BigQuery API Service with Firestore Storage
 FastAPI backend using Firestore for data persistence
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -13,8 +13,18 @@ import hashlib
 import re
 import json
 import os
+import time
+import logging
 from pydantic import BaseModel
 from firestore_service import firestore_service
+from firestore_templates import TemplateFirestoreManager
+
+# Initialize template manager
+template_manager = TemplateFirestoreManager()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -275,6 +285,34 @@ async def scan_project(project_id: str, analysis_window: int = 30):
             
             template_list.append(template)
         
+        # Save templates to Firestore
+        if template_list:
+            # Prepare templates for Firestore storage
+            firestore_templates = []
+            for template in template_list:
+                firestore_template = {
+                    'sqlSnippet': template['sql_pattern'],
+                    'fullSql': template.get('full_sql', template['sql_pattern']),
+                    'tables': template.get('tables_used', []),
+                    'runs': template['total_runs'],
+                    'avgBytesProcessed': template.get('avg_bytes_processed', 0),
+                    'bytesProcessedP90': template.get('p90_bytes_processed', 0),
+                    'avgRuntime': template.get('avg_runtime_seconds', 0),
+                    'runtimeP50': template.get('p50_runtime_seconds', 0),
+                    'avgCostPerRun': template.get('avg_cost_per_run', 0),
+                    'totalCost': template.get('total_cost', 0),
+                    'estimatedMonthlyCost': template.get('estimated_monthly_cost', 0),
+                    'runsPerDay': template.get('runs_per_day', 0),
+                    'firstSeen': template.get('first_seen'),
+                    'lastSeen': template.get('last_seen'),
+                    'recentRuns': template.get('recent_runs', [])
+                }
+                firestore_templates.append(firestore_template)
+            
+            # Batch save to Firestore
+            template_ids = template_manager.batch_save_templates(project_id, firestore_templates)
+            logger.info(f"Saved {len(template_ids)} templates to Firestore for project {project_id}")
+        
         return {
             "success": True,
             "project_id": project_id,
@@ -447,7 +485,7 @@ async def get_project_templates(project_id: str):
 
 @app.post("/api/projects/{project_id}/refresh")
 async def refresh_project(project_id: str):
-    """Refresh project data by rescanning queries"""
+    """Refresh project data by rescanning queries while preserving analysis results"""
     if not bq_client:
         raise HTTPException(status_code=503, detail="BigQuery client not initialized")
     
@@ -459,26 +497,40 @@ async def refresh_project(project_id: str):
         
         analysis_window = project.get('analysis_window', 30)
         
+        # Get existing templates to preserve analysis results
+        existing_templates = template_manager.get_project_templates(project_id)
+        existing_analysis = {}
+        for template in existing_templates:
+            if template.get('analysis_result_id'):
+                existing_analysis[template['template_id']] = {
+                    'analysis_result_id': template['analysis_result_id'],
+                    'analysis_status': template.get('analysis_status', 'completed'),
+                    'compliance_score': template.get('compliance_score')
+                }
+        
         # Rescan the project
         scan_result = await scan_project(project_id, analysis_window)
         
-        # Delete old templates
-        firestore_service.delete_templates(project_id)
-        
-        # Save new templates
+        # The scan_project function now uses batch_save_templates which preserves analysis
+        # But let's ensure analysis data is preserved for any new template IDs
         if scan_result["templates"]:
-            saved_count = firestore_service.save_templates(
-                scan_result["templates"],
-                project_id
-            )
-            print(f"Saved {saved_count} templates to Firestore")
+            # Update templates with preserved analysis if template IDs match
+            for template in scan_result["templates"]:
+                template_id = template_manager._generate_template_id(project_id, template.get('sql_pattern', ''))
+                if template_id in existing_analysis:
+                    # This template had analysis before, preserve it
+                    logger.info(f"Preserving analysis for template {template_id}")
         
         # Update last_scan_at
         firestore_service.update_project(project_id, {
             'last_scan_at': datetime.utcnow().isoformat()
         })
         
-        return scan_result
+        return {
+            **scan_result,
+            "analysis_preserved": len(existing_analysis),
+            "message": f"Refreshed {scan_result['templates_discovered']} templates, preserved {len(existing_analysis)} analysis results"
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -553,6 +605,232 @@ async def get_analyses(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Template Management Endpoints
+@app.post("/api/templates/save-analysis")
+async def save_template_analysis(data: dict = Body(...)):
+    """Save analysis result for a template"""
+    try:
+        project_id = data.get('project_id')
+        template_id = data.get('template_id')
+        result = data.get('result')
+        
+        if not all([project_id, template_id, result]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+        
+        analysis_id = template_manager.save_analysis_result(project_id, template_id, result)
+        
+        return {
+            "success": True,
+            "analysis_id": analysis_id,
+            "message": "Analysis saved successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/templates/{project_id}")
+async def get_project_templates_with_analysis(project_id: str):
+    """Get all templates for a project with their analysis results (optimized)"""
+    try:
+        # Use the optimized batch loading method
+        templates = template_manager.get_project_templates(project_id)
+        
+        # Format templates for frontend - analysis results are already loaded
+        formatted_templates = []
+        for template in templates:
+            # Ensure we have an id field for the frontend
+            template_data = {
+                'id': template.get('template_id', template.get('id')),
+                'template_id': template.get('template_id'),
+                'projectId': template.get('project_id'),
+                **template  # Include all other fields
+            }
+            
+            # Analysis result is already loaded in the template from batch query
+            if template.get('analysis_result'):
+                template_data['analysisResult'] = template['analysis_result']
+                template_data['analysisStatus'] = 'completed'
+            elif template.get('analysis_result_id'):
+                # Has analysis ID but no result loaded (shouldn't happen with new code)
+                template_data['analysisStatus'] = 'pending'
+            else:
+                template_data['analysisStatus'] = 'new'
+            
+            formatted_templates.append(template_data)
+        
+        return formatted_templates
+    except Exception as e:
+        logger.error(f"Error fetching templates for project {project_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/templates/{project_id}/{template_id}/analysis")
+async def get_template_analysis(project_id: str, template_id: str):
+    """Get analysis result for a specific template"""
+    try:
+        analysis = template_manager.get_template_analysis(template_id)
+        if analysis:
+            return analysis
+        else:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Rules Management Endpoints
+@app.get("/api/rules")
+async def get_all_rules():
+    """Get all BigQuery anti-pattern rules from Firestore"""
+    try:
+        rules = []
+        # Use the db directly from firestore module
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        rules_ref = db.collection('bq_anti_pattern_rules')
+        docs = rules_ref.stream()
+        
+        for doc in docs:
+            # Skip metadata document
+            if doc.id == '_metadata':
+                continue
+            rule_data = doc.to_dict()
+            rule_data['docId'] = doc.id
+            rules.append(rule_data)
+        
+        # Sort rules by order if available, otherwise by title
+        rules.sort(key=lambda x: (x.get('order', 999), x.get('title', '')))
+        return rules
+    except Exception as e:
+        logger.error(f"Error fetching rules: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/rules/{rule_id}")
+async def get_rule(rule_id: str):
+    """Get a specific rule by ID"""
+    try:
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            rule_data = doc.to_dict()
+            rule_data['docId'] = doc.id
+            return rule_data
+        else:
+            raise HTTPException(status_code=404, detail="Rule not found")
+    except Exception as e:
+        logger.error(f"Error fetching rule {rule_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/rules/{rule_id}/toggle")
+async def toggle_rule(rule_id: str, enabled: bool = Body(...)):
+    """Toggle a rule's enabled status"""
+    try:
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        
+        doc_ref.update({
+            'enabled': enabled,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        return {"success": True, "message": f"Rule {rule_id} {'enabled' if enabled else 'disabled'}"}
+    except Exception as e:
+        logger.error(f"Error toggling rule {rule_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rules")
+async def create_rule(rule: Dict[str, Any] = Body(...)):
+    """Create a new rule"""
+    try:
+        rule_id = rule.get('id')
+        if not rule_id:
+            raise HTTPException(status_code=400, detail="Rule ID is required")
+        
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        
+        # Check if rule already exists
+        if doc_ref.get().exists:
+            raise HTTPException(status_code=409, detail="Rule with this ID already exists")
+        
+        rule_data = {
+            'id': rule_id,
+            'title': rule.get('title', ''),
+            'severity': rule.get('severity', 'warning'),
+            'enabled': rule.get('enabled', True),
+            'detect': rule.get('detect', ''),
+            'fix': rule.get('fix', ''),
+            'examples': rule.get('examples', {}),
+            'category': rule.get('category', 'General'),
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        doc_ref.set(rule_data)
+        rule_data['docId'] = rule_id
+        return rule_data
+    except Exception as e:
+        logger.error(f"Error creating rule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/rules/{rule_id}")
+async def update_rule(rule_id: str, rule: Dict[str, Any] = Body(...)):
+    """Update an existing rule"""
+    try:
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        
+        if not doc_ref.get().exists:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        
+        update_data = {
+            'title': rule.get('title'),
+            'severity': rule.get('severity'),
+            'enabled': rule.get('enabled'),
+            'detect': rule.get('detect'),
+            'fix': rule.get('fix'),
+            'examples': rule.get('examples'),
+            'category': rule.get('category'),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Remove None values
+        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        doc_ref.update(update_data)
+        
+        updated_doc = doc_ref.get()
+        rule_data = updated_doc.to_dict()
+        rule_data['docId'] = updated_doc.id
+        return rule_data
+    except Exception as e:
+        logger.error(f"Error updating rule {rule_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/rules/{rule_id}")
+async def delete_rule(rule_id: str):
+    """Delete a rule"""
+    try:
+        from google.cloud import firestore as fs
+        db = fs.Client(project='aiva-e74f3')
+        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        
+        if not doc_ref.get().exists:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        
+        doc_ref.delete()
+        return {"success": True, "message": f"Rule {rule_id} deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting rule {rule_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

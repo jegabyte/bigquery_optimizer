@@ -22,26 +22,35 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    
+    const loadDashboardData = async () => {
+      try {
+        // Load real BigQuery data in parallel for better performance
+        const [dashStats, projectsData] = await Promise.all([
+          dashboardApiService.getDashboardStats(),
+          projectsApiService.getProjects()
+        ]);
+        
+        if (mounted) {
+          setDashboardData(dashStats);
+          setProjectList(projectsData);
+        }
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+    
     loadDashboardData();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
-
-  const loadDashboardData = async () => {
-    try {
-      // Load real BigQuery data
-      const [dashStats, projectsData] = await Promise.all([
-        dashboardApiService.getDashboardStats(),
-        projectsApiService.getProjects()
-      ]);
-      
-      setDashboardData(dashStats);
-      setProjectList(projectsData);
-      
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const performanceData = [
     { date: 'Mon', queries: 12, optimized: 10 },
@@ -93,32 +102,32 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-2 text-gray-600">Monitor your BigQuery optimization performance</p>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="mt-1 text-sm text-gray-600">Monitor your BigQuery optimization performance</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsDisplay.map((stat, index) => (
-          <div key={index} className="card">
+          <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">{stat.label}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
+                <p className="text-xs text-gray-600">{stat.label}</p>
+                <p className="text-xl font-bold text-gray-900 mt-0.5">{stat.value}</p>
               </div>
-              <div className={`${stat.bgColor} p-3 rounded-lg`}>
-                <stat.icon className={`h-6 w-6 ${stat.color}`} />
+              <div className={`${stat.bgColor} p-2 rounded-lg`}>
+                <stat.icon className={`h-5 w-5 ${stat.color}`} />
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Query Optimization Trend</h2>
-          <ResponsiveContainer width="100%" height={250}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">Query Optimization Trend</h2>
+          <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={performanceData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis dataKey="date" stroke="#6b7280" />
@@ -130,24 +139,35 @@ const Dashboard = () => {
           </ResponsiveContainer>
         </div>
 
-        <div className="card">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Active Projects</h2>
-            <Link to="/query-analysis" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Active Projects</h2>
+            <Link to="/query-analysis" className="text-primary-600 hover:text-primary-700 text-xs font-medium">
               View All <FiArrowRight className="inline ml-1" />
             </Link>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {projectList.length === 0 ? (
-              <p className="text-sm text-gray-500">No projects yet. Start by analyzing a query.</p>
+              <p className="text-xs text-gray-500">No projects yet. Start by analyzing a query.</p>
             ) : (
               projectList.slice(0, 3).map((project) => (
-                <div key={project.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                <div key={project.id} className="flex justify-between items-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                   <div>
-                    <p className="font-medium text-gray-900">{project.name}</p>
-                    <p className="text-sm text-gray-600">Project ID: {project.projectId}</p>
+                    <p className="text-sm font-medium text-gray-900">{project.name}</p>
+                    <p className="text-xs text-gray-600">Project ID: {project.projectId}</p>
                   </div>
-                  <span className="text-xs text-gray-500">Created: {new Date(project.createdAt).toLocaleDateString()}</span>
+                  {(project.createdAt || project.lastUpdated) && (
+                    <span className="text-xs text-gray-500">
+                      {(() => {
+                        const dateStr = project.createdAt || project.lastUpdated;
+                        try {
+                          return new Date(dateStr).toLocaleDateString();
+                        } catch {
+                          return '';
+                        }
+                      })()}
+                    </span>
+                  )}
                 </div>
               ))
             )}
@@ -155,22 +175,22 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Query Templates</h2>
-            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Recent Query Templates</h2>
+            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-xs font-medium">
               View All <FiArrowRight className="inline ml-1" />
             </Link>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {dashboardData.recent_templates.length === 0 ? (
-              <p className="text-sm text-gray-500">No query templates found.</p>
+              <p className="text-xs text-gray-500">No query templates found.</p>
             ) : (
               dashboardData.recent_templates.slice(0, 5).map((template) => (
-                <div key={template.template_id} className="p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm font-mono text-gray-800 truncate">{template.sql_snippet || template.sql_pattern?.substring(0, 100) || 'N/A'}</p>
-                  <div className="flex justify-between mt-2 text-xs text-gray-600">
+                <div key={template.template_id} className="p-2 bg-gray-50 rounded-lg">
+                  <p className="text-xs font-mono text-gray-800 truncate">{template.sql_snippet || template.sql_pattern?.substring(0, 100) || 'N/A'}</p>
+                  <div className="flex justify-between mt-1 text-xs text-gray-600">
                     <span>{template.total_runs || 0} runs</span>
                     <span>{(template.gb_processed || template.total_bytes_processed / 1e9 || 0).toFixed(2)} GB</span>
                     <span>{template.last_seen ? new Date(template.last_seen).toLocaleDateString() : 'N/A'}</span>
@@ -181,21 +201,21 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Top Cost Drivers</h2>
-            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Top Cost Drivers</h2>
+            <Link to="/projects" className="text-primary-600 hover:text-primary-700 text-xs font-medium">
               Optimize <FiArrowRight className="inline ml-1" />
             </Link>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {dashboardData.top_cost_drivers.length === 0 ? (
-              <p className="text-sm text-gray-500">No cost analysis available.</p>
+              <p className="text-xs text-gray-500">No cost analysis available.</p>
             ) : (
               dashboardData.top_cost_drivers.map((driver) => (
-                <div key={driver.template_id} className="p-3 bg-red-50 rounded-lg">
-                  <p className="text-sm font-mono text-gray-800 truncate">{driver.sql_snippet || driver.sql_pattern?.substring(0, 100) || 'N/A'}</p>
-                  <div className="flex justify-between mt-2">
+                <div key={driver.template_id} className="p-2 bg-red-50 rounded-lg">
+                  <p className="text-xs font-mono text-gray-800 truncate">{driver.sql_snippet || driver.sql_pattern?.substring(0, 100) || 'N/A'}</p>
+                  <div className="flex justify-between mt-1">
                     <span className="text-xs text-gray-600">{driver.total_runs || 0} runs</span>
                     <span className="text-sm font-semibold text-red-600">
                       ${(driver.estimated_cost || 0).toFixed(2)}

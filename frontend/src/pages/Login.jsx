@@ -5,8 +5,8 @@ import { FiDatabase, FiLock, FiUser } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 
 const Login = () => {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('bigquery123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -101,12 +101,6 @@ const Login = () => {
                 'Sign In'
               )}
             </button>
-            
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-blue-800 font-medium mb-1">Demo Credentials:</p>
-              <p className="text-sm text-blue-700">Username: admin</p>
-              <p className="text-sm text-blue-700">Password: bigquery123</p>
-            </div>
             </form>
           </div>
         </div>

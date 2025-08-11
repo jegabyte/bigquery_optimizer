@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   FiArrowLeft,
@@ -20,38 +21,88 @@ import TemplatesGrid from './TemplatesGrid';
 import TemplateDetails from './TemplateDetails';
 import { formatCost } from '../../services/projectsMockData';
 import { projectsApiService } from '../../services/projectsApiService';
+import { optimizeQueryWithADK } from '../../services/adk';
+// Removed analysisService - now using Firestore via API
+import toast from 'react-hot-toast';
 
 const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPause }) => {
+  const navigate = useNavigate();
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [isTemplateDrawerOpen, setIsTemplateDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('templates');
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+  const [analyzingTemplates, setAnalyzingTemplates] = useState(new Set());
+  const [analysisResults, setAnalysisResults] = useState({});
+  const [analysisStatuses, setAnalysisStatuses] = useState({});
 
   // Fetch templates when component mounts or project changes
   useEffect(() => {
+    let mounted = true; // Flag to prevent state updates after unmount
+    
     const fetchTemplates = async () => {
+      if (!mounted) return;
       setIsLoadingTemplates(true);
+      
       try {
         const templatesData = await projectsApiService.getProjectTemplates(project.projectId);
+        
+        if (!mounted) return; // Check again after async operation
         // Convert date strings to Date objects for the component
-        const templatesWithDates = templatesData.map(template => ({
-          ...template,
-          firstSeen: template.firstSeen ? new Date(template.firstSeen) : null,
-          lastSeen: template.lastSeen ? new Date(template.lastSeen) : null
-        }));
-        setTemplates(templatesWithDates);
+        const templatesWithDates = templatesData.map(template => {
+          const templateWithDate = {
+            ...template,
+            firstSeen: template.firstSeen ? new Date(template.firstSeen) : null,
+            lastSeen: template.lastSeen ? new Date(template.lastSeen) : null
+          };
+          
+          // Check if template has analysis result from Firestore
+          if (template.analysisResult) {
+            // Template already has analysis from Firestore
+            console.log('Template has analysis result:', template.id, template.analysisResult);
+            setAnalysisResults(prev => ({
+              ...prev,
+              [template.id]: template.analysisResult
+            }));
+            setAnalysisStatuses(prev => ({
+              ...prev,
+              [template.id]: template.analysisStatus || 'completed'
+            }));
+            templateWithDate.state = 'analyzed';
+            templateWithDate.complianceScore = template.analysisResult.metadata?.optimizationScore;
+          } else {
+            // Template has no analysis yet - set status to 'new' or use existing status
+            setAnalysisStatuses(prev => ({
+              ...prev,
+              [template.id]: template.analysisStatus || 'new'
+            }));
+          }
+          
+          return templateWithDate;
+        });
+        if (mounted) {
+          setTemplates(templatesWithDates);
+        }
       } catch (error) {
         console.error('Failed to fetch templates:', error);
-        setTemplates([]);
+        if (mounted) {
+          setTemplates([]);
+        }
       } finally {
-        setIsLoadingTemplates(false);
+        if (mounted) {
+          setIsLoadingTemplates(false);
+        }
       }
     };
 
     if (project?.projectId) {
       fetchTemplates();
     }
+    
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      mounted = false;
+    };
   }, [project]);
 
   const handleTemplateClick = (template) => {
@@ -59,9 +110,158 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
     setIsTemplateDrawerOpen(true);
   };
 
-  const handleBulkAction = (action, templateIds) => {
+  const handleBulkAction = async (action, templateIds) => {
     console.log('Bulk action:', action, templateIds);
-    alert(`${action} ${templateIds.length} template(s)`);
+    
+    if (action === 'analyze' && templateIds.length > 0) {
+      // If only one template selected, open the drawer
+      if (templateIds.length === 1) {
+        const templateId = templateIds[0];
+        const template = templates.find(t => t.id === templateId);
+        
+        if (!template || !template.fullSql) {
+          toast.error('Template SQL not found');
+          return;
+        }
+        
+        // Mark as analyzing and set status
+        setAnalyzingTemplates(prev => new Set([...prev, templateId]));
+        setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'analyzing' }));
+        
+        // Open the template drawer
+        setSelectedTemplate(template);
+        setIsTemplateDrawerOpen(true);
+        
+        // Run single analysis
+        await analyzeTemplate(templateId, template);
+      } else {
+        // Multiple templates selected - run in parallel without opening drawers
+        toast.loading(`Starting analysis for ${templateIds.length} templates...`, { 
+          id: 'bulk-analysis-start' 
+        });
+        
+        // Mark all as analyzing
+        setAnalyzingTemplates(prev => new Set([...prev, ...templateIds]));
+        templateIds.forEach(id => {
+          setAnalysisStatuses(prev => ({ ...prev, [id]: 'analyzing' }));
+        });
+        
+        // Create analysis promises for all selected templates
+        const analysisPromises = templateIds.map(async (templateId) => {
+          const template = templates.find(t => t.id === templateId);
+          
+          if (!template || !template.fullSql) {
+            console.error(`Template ${templateId} SQL not found`);
+            return { templateId, error: 'Template SQL not found' };
+          }
+          
+          try {
+            const result = await analyzeTemplate(templateId, template);
+            return { templateId, result };
+          } catch (error) {
+            console.error(`Analysis error for template ${templateId}:`, error);
+            return { templateId, error: error.message };
+          }
+        });
+        
+        // Run all analyses in parallel
+        const results = await Promise.all(analysisPromises);
+        
+        toast.dismiss('bulk-analysis-start');
+        
+        // Count successes and failures
+        const successful = results.filter(r => r.result && !r.error).length;
+        const failed = results.filter(r => r.error).length;
+        
+        if (successful > 0 && failed === 0) {
+          toast.success(`Successfully analyzed ${successful} template(s)`);
+        } else if (successful > 0 && failed > 0) {
+          toast.success(`Analyzed ${successful} template(s), ${failed} failed`);
+        } else {
+          toast.error(`Failed to analyze ${failed} template(s)`);
+        }
+      }
+    } else if (action === 'reanalyze') {
+      // Handle re-analyze similarly
+      handleBulkAction('analyze', templateIds);
+    } else {
+      toast.info(`Action ${action} for ${templateIds.length} template(s)`);
+    }
+  };
+  
+  // Extract the analysis logic into a separate function
+  const analyzeTemplate = async (templateId, template) => {
+    try {
+      // Create a unique session ID for this analysis
+      const sessionId = `template_${templateId}_${Date.now()}`;
+      
+      // Call the ADK optimization service
+      const result = await optimizeQueryWithADK(template.fullSql, {
+        sessionId: sessionId,
+        projectId: project.projectId,
+        datasetId: template.tables?.[0]?.split('.')[0] || 'analytics',
+        userId: 'user_' + Date.now(),
+        validate: true,
+        onProgress: (event) => {
+          console.log(`Analysis progress for ${templateId}:`, event);
+          // Update analysis progress stage
+          if (event.stage) {
+            setAnalysisResults(prev => ({
+              ...prev,
+              [templateId]: { ...prev[templateId], stage: event.stage }
+            }));
+          }
+        },
+        onStageComplete: (stage, data) => {
+          console.log(`Stage ${stage} complete for ${templateId}:`, data);
+          // Update analysis results with stage data
+          setAnalysisResults(prev => ({
+            ...prev,
+            [templateId]: { ...prev[templateId], stage, [stage]: data }
+          }));
+        }
+      });
+      
+      if (result && !result.error) {
+        // Store the analysis result
+        setAnalysisResults(prev => ({
+          ...prev,
+          [templateId]: result
+        }));
+        setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'completed' }));
+        
+        // Save to Firestore via API
+        try {
+          await projectsApiService.saveTemplateAnalysis(project.projectId, templateId, result);
+          console.log(`Analysis result saved to Firestore for template ${templateId}`);
+        } catch (error) {
+          console.error('Failed to save analysis to Firestore:', error);
+          // Continue even if save fails - result is still in memory
+        }
+        
+        // Update template state
+        setTemplates(prev => prev.map(t => 
+          t.id === templateId 
+            ? { ...t, state: 'analyzed', complianceScore: result.metadata?.optimizationScore }
+            : t
+        ));
+        
+        return result;
+      } else {
+        setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'failed' }));
+        throw new Error(result?.message || 'Analysis failed');
+      }
+    } catch (error) {
+      setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'failed' }));
+      throw error;
+    } finally {
+      // Remove from analyzing set
+      setAnalyzingTemplates(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(templateId);
+        return newSet;
+      });
+    }
   };
 
   const handleAnalyzeTemplate = (templateId, options) => {
@@ -93,8 +293,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
 
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 pb-3">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
@@ -114,27 +314,6 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
             </div>
             <div className="flex items-center space-x-3">
               <button
-                onClick={() => onRefresh(project.id)}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
-              >
-                <FiRefreshCw className="h-4 w-4" />
-                <span>Refresh</span>
-              </button>
-              <button
-                onClick={() => onEdit(project.id)}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
-              >
-                <FiSettings className="h-4 w-4" />
-                <span>Settings</span>
-              </button>
-              <button
-                onClick={() => onPause(project.id)}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
-              >
-                <FiPause className="h-4 w-4" />
-                <span>Pause</span>
-              </button>
-              <button
                 onClick={() => {
                   if (confirm('Are you sure you want to remove this project?')) {
                     onRemove(project.id);
@@ -152,7 +331,7 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       </div>
 
       {/* Key Metrics */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="px-4 sm:px-6 lg:px-8 py-3">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -251,7 +430,7 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       </div>
 
       {/* Tabs */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="px-4 sm:px-6 lg:px-8">
         <div className="border-b border-gray-200 dark:border-gray-700">
           <nav className="-mb-px flex space-x-8">
             {tabs.map((tab) => (
@@ -277,7 +456,7 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       </div>
 
       {/* Tab Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'templates' && (
           isLoadingTemplates ? (
             <div className="flex items-center justify-center h-64">
@@ -288,6 +467,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
               templates={templates}
               onTemplateClick={handleTemplateClick}
               onBulkAction={handleBulkAction}
+              analyzingTemplates={analyzingTemplates}
+              analysisStatuses={analysisStatuses}
             />
           )
         )}
@@ -306,7 +487,7 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
                     Last Updated
                   </dt>
                   <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {project.lastUpdated.toLocaleString()}
+                    {project.lastUpdated instanceof Date ? project.lastUpdated.toLocaleString() : new Date(project.lastUpdated).toLocaleString()}
                   </dd>
                 </div>
                 <div className="flex justify-between">
@@ -405,6 +586,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
         isOpen={isTemplateDrawerOpen}
         onClose={() => setIsTemplateDrawerOpen(false)}
         onAnalyze={handleAnalyzeTemplate}
+        analysisStatus={selectedTemplate ? analysisStatuses[selectedTemplate.id] : null}
+        analysisResult={selectedTemplate ? analysisResults[selectedTemplate.id] : null}
       />
     </div>
   );

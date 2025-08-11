@@ -13,6 +13,13 @@ from google.adk.tools import FunctionTool
 from app.bigquery_metadata import fetch_tables_metadata, bigquery_dry_run
 from app.callbacks import create_streaming_callback
 
+# Try to import firestore_rules, but don't fail if it's not available
+try:
+    from app.firestore_rules import fetch_rules_from_firestore
+except ImportError as e:
+    logger.warning(f"Could not import firestore_rules: {e}")
+    fetch_rules_from_firestore = None
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,17 +31,26 @@ DATASET = os.getenv("BIGQUERY_DATASET", "analytics")
 
 # --- Load Rules ---
 def load_bq_anti_patterns():
-    """Load BigQuery anti-patterns from bq_anti_patterns.yaml"""
-    patterns_path = os.path.join(os.path.dirname(__file__), 'bq_anti_patterns.yaml')
-    try:
-        with open(patterns_path, 'r') as f:
-            patterns_content = f.read()
-        logger.info(f"✅ Loaded BigQuery anti-patterns from {patterns_path}")
-        return patterns_content
-    except Exception as e:
-        logger.error(f"❌ Failed to load BigQuery anti-patterns: {e}")
-        # Return default rules if file not found
-        return """
+    """Load BigQuery anti-patterns from Firestore (primary) or YAML file (fallback)"""
+    # Try to load from Firestore first if available
+    if fetch_rules_from_firestore is not None:
+        try:
+            patterns_content = fetch_rules_from_firestore(PROJECT_ID)
+            logger.info("✅ Loaded BigQuery anti-patterns from Firestore")
+            return patterns_content
+        except Exception as firestore_error:
+            logger.warning(f"⚠️  Failed to load from Firestore: {firestore_error}, trying YAML file")
+        # Fallback to YAML file
+        patterns_path = os.path.join(os.path.dirname(__file__), 'bq_anti_patterns.yaml')
+        try:
+            with open(patterns_path, 'r') as f:
+                patterns_content = f.read()
+            logger.info(f"✅ Loaded BigQuery anti-patterns from {patterns_path}")
+            return patterns_content
+        except Exception as e:
+            logger.error(f"❌ Failed to load BigQuery anti-patterns from both sources: {e}")
+            # Return default rules if both fail
+            return """
 version: 2
 rules:
   - id: NO_SELECT_STAR
@@ -43,6 +59,12 @@ rules:
     enabled: true
     detect: "Flag wildcard projection (* or t.*) except COUNT(*), * EXCEPT(...), or * REPLACE(...)."
     fix: "Select only required columns."
+  - id: MISSING_PARTITION_FILTER
+    title: "Missing partition filter"
+    severity: error
+    enabled: true
+    detect: "Partitioned table read without a WHERE on its partition column."
+    fix: "Add a constant/param range filter on the partition column."
 """
 
 BQ_ANTI_PATTERNS = load_bq_anti_patterns()
@@ -154,7 +176,7 @@ metadata_extractor = LlmAgent(
 rule_checker = LlmAgent(
     name="rule_checker",
     model="gemini-2.5-flash",
-    description="Checks query against BigQuery anti-patterns from bq_anti_patterns.yaml",
+    description="Checks query against BigQuery anti-patterns from Firestore/YAML",
     instruction=f"""
 You are a BigQuery SQL anti-pattern checker.
 
