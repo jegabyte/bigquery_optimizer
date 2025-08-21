@@ -136,6 +136,36 @@ class BigQueryMetadataTool:
                 # Table truly not found
                 raise NotFound(f"Table {table_ref_full} not found")
             
+            # Log the raw values for debugging
+            logger.info(f"Table {table_ref_full}: num_bytes={table_obj.num_bytes}, num_rows={table_obj.num_rows}")
+            
+            # For GA4 tables and some other tables, size might not be immediately available
+            # Try to get size from TABLE_STORAGE or __TABLES__ if num_bytes is None
+            size_bytes = table_obj.num_bytes
+            row_count = table_obj.num_rows or 0
+            
+            if size_bytes is None or size_bytes == 0:
+                try:
+                    # Try using __TABLES__ which usually has size info
+                    tables_query = f"""
+                    SELECT size_bytes, row_count 
+                    FROM `{project}.{dataset}.__TABLES__`
+                    WHERE table_id = '{table}'
+                    """
+                    tables_result = client.query(tables_query)
+                    for row in tables_result:
+                        if row.size_bytes is not None:
+                            size_bytes = row.size_bytes
+                            logger.info(f"Got size from __TABLES__: {size_bytes} bytes")
+                        if row.row_count is not None and row_count == 0:
+                            row_count = row.row_count
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not get size from __TABLES__: {e}")
+            
+            # Use the size we found (or 0 if nothing worked)
+            size_bytes = size_bytes or 0
+            
             # Get comprehensive metadata
             metadata = {
                 "table_path": table_ref_full,
@@ -144,10 +174,10 @@ class BigQueryMetadataTool:
                 "table_name": table,
                 
                 # Size and row metrics
-                "row_count": table_obj.num_rows or 0,
-                "size_bytes": table_obj.num_bytes or 0,
-                "size_gb": round((table_obj.num_bytes or 0) / (1024**3), 2),
-                "size_mb": round((table_obj.num_bytes or 0) / (1024**2), 2),
+                "row_count": row_count,
+                "size_bytes": size_bytes,
+                "size_gb": round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0,
+                "size_mb": round(size_bytes / (1024**2), 2) if size_bytes > 0 else 0,
                 
                 # Partitioning information
                 "partitioned": table_obj.partitioning_type is not None,
@@ -506,14 +536,15 @@ def format_bytes(bytes_value: int) -> str:
         bytes_value /= 1024.0
     return f"{bytes_value:.2f} PB"
 
-def calculate_cost(bytes_processed: int, price_per_tb: float = 5.0) -> float:
+def calculate_cost(bytes_processed: int, price_per_tb: float = 6.25) -> float:
     """
     Calculate BigQuery query cost based on bytes processed
-    Default pricing: $5 per TB for on-demand queries
+    Default pricing: $6.25 per TB for on-demand queries
+    Note: BigQuery uses decimal TB (1 TB = 10^12 bytes), not binary TiB
     """
-    tb_processed = bytes_processed / (1024 ** 4)  # Convert bytes to TB
+    tb_processed = bytes_processed / (10 ** 12)  # Convert bytes to TB (decimal)
     cost = tb_processed * price_per_tb
-    return round(cost, 6)  # Round to 6 decimal places for precision
+    return round(cost, 2)  # Round to 2 decimal places for currency
 
 def bigquery_dry_run(query: str, project_id: Optional[str] = None) -> str:
     """
