@@ -186,6 +186,131 @@ export REGION="us-central1"
 source .env
 ```
 
+## Cloud Deployment Prerequisites
+
+Before deploying to Google Cloud Run, ensure you have completed all prerequisites:
+
+### 1. Google Cloud Project Setup
+
+```bash
+# Set your project ID
+export GCP_PROJECT_ID="your-project-id"
+gcloud config set project $GCP_PROJECT_ID
+
+# Enable required APIs
+gcloud services enable \
+    bigquery.googleapis.com \
+    run.googleapis.com \
+    cloudbuild.googleapis.com \
+    artifactregistry.googleapis.com \
+    compute.googleapis.com \
+    aiplatform.googleapis.com \
+    firestore.googleapis.com
+
+# Verify billing is enabled
+gcloud beta billing projects describe $GCP_PROJECT_ID
+```
+
+### 2. Authentication & Permissions
+
+```bash
+# Authenticate with Google Cloud
+gcloud auth login
+gcloud auth application-default login
+
+# Verify you have owner/editor role or required permissions
+gcloud projects get-iam-policy $GCP_PROJECT_ID \
+    --flatten="bindings[].members" \
+    --filter="bindings.members:$(gcloud config get-value account)" \
+    --format="value(bindings.role)"
+```
+
+### 3. BigQuery Dataset Setup
+
+```bash
+# Create BigQuery dataset for storing analysis results
+bq mk --dataset \
+    --location=US \
+    --description="BigQuery Optimizer Analysis Storage" \
+    $GCP_PROJECT_ID:bq_optimizer
+
+# Verify dataset creation
+bq ls --project_id=$GCP_PROJECT_ID
+```
+
+### 4. Firestore Database Initialization
+
+```bash
+# Create Firestore database (if not exists)
+gcloud firestore databases create \
+    --location=us-central1 \
+    --project=$GCP_PROJECT_ID
+
+# Verify Firestore is ready
+gcloud firestore databases list --project=$GCP_PROJECT_ID
+```
+
+### 5. Install Required Tools
+
+```bash
+# Install Google ADK for Agent API deployment
+pip install google-adk
+
+# Verify ADK installation
+adk --version
+
+# Ensure Python 3.10+ is installed
+python3 --version
+
+# Ensure Node.js and npm are installed
+node --version
+npm --version
+```
+
+### 6. Environment Configuration
+
+```bash
+# Create .env file from template
+cp .env.example .env
+
+# Edit .env with your configuration
+cat > .env << EOF
+# Google Cloud Configuration
+export GCP_PROJECT_ID="$GCP_PROJECT_ID"
+export BQ_PROJECT_ID="$GCP_PROJECT_ID"  # Can be different for cross-project analysis
+export BQ_DATASET="bq_optimizer"
+export BQ_LOCATION="US"
+export REGION="us-central1"
+export BACKEND_TYPE="firestore"         # or "bigquery"
+export APP_ENV="production"
+
+# Service Names (optional - has defaults)
+export AGENT_API_SERVICE="bigquery-optimizer-agent-api"
+export BACKEND_API_SERVICE="bigquery-optimizer-backend-api"
+export FRONTEND_SERVICE="bigquery-optimizer-frontend"
+EOF
+
+# Load environment variables
+source .env
+```
+
+### 7. Validate Prerequisites
+
+```bash
+# Run validation script to check all prerequisites
+./validate_deployment.sh
+
+# This script checks:
+# ✅ Environment variables
+# ✅ Required tools (gcloud, ADK, Python, Node.js)
+# ✅ GCP APIs enabled
+# ✅ IAM permissions
+# ✅ BigQuery dataset
+# ✅ Firestore database
+# ✅ Local dependencies
+# ✅ Billing enabled
+```
+
 ## Deployment
 
 ### Local Development
@@ -203,6 +328,8 @@ source .env
 ### Cloud Run Deployment
 
 ```bash
+# IMPORTANT: Complete all prerequisites above first!
+
 # Deploy all services to Cloud Run
 ./deploy.sh remote
 
@@ -214,8 +341,30 @@ source .env
 # Check deployment status
 ./deploy.sh status
 
+# View service logs
+gcloud run services logs read $AGENT_API_SERVICE --region=$REGION
+gcloud run services logs read $BACKEND_API_SERVICE --region=$REGION
+gcloud run services logs read $FRONTEND_SERVICE --region=$REGION
+
 # Destroy all Cloud Run services
 ./deploy.sh destroy
+```
+
+### Deployment Order
+
+For first-time deployment, deploy services in this order:
+1. **Agent API** - Core optimization engine with ADK
+2. **Backend API** - Firestore/BigQuery data management
+3. **Frontend** - React web interface
+
+```bash
+# Sequential deployment (recommended for first time)
+./deploy.sh remote-agent-api
+./deploy.sh remote-backend-api
+./deploy.sh remote-frontend
+
+# Or deploy all at once
+./deploy.sh remote
 ```
 
 ### Deployment to Different Projects
@@ -232,6 +381,97 @@ GCP_PROJECT_ID="my-project-id" ./deploy.sh remote
 # Option 3: Use environment file
 source .env.production
 ./deploy.sh remote
+```
+
+## Troubleshooting Deployment
+
+### Common Issues and Solutions
+
+#### 1. ADK Deployment Fails with "No root_agent found"
+```bash
+# Error: No root_agent found for 'app'
+# Solution: Ensure you're deploying from within agent_api folder
+cd agent_api
+adk deploy cloud_run --project=$PROJECT_ID --region=$REGION \
+    --service_name=$SERVICE_NAME --allow_origins="*" --with_ui app
+```
+
+#### 2. "exec format error" on Cloud Run (M1/M2 Macs)
+```bash
+# Error: exec format error when deploying from ARM64 Macs
+# Solution: ADK handles cross-platform builds automatically
+# Ensure you're using the latest ADK version
+pip install --upgrade google-adk
+```
+
+#### 3. APIs Not Enabled
+```bash
+# Error: API [service.googleapis.com] not enabled
+# Solution: Enable all required APIs
+gcloud services enable bigquery.googleapis.com run.googleapis.com \
+    cloudbuild.googleapis.com artifactregistry.googleapis.com \
+    compute.googleapis.com aiplatform.googleapis.com firestore.googleapis.com
+```
+
+#### 4. Permission Denied Errors
+```bash
+# Error: Permission denied on BigQuery/Firestore operations
+# Solution: Ensure proper IAM roles
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+    --member="user:$(gcloud config get-value account)" \
+    --role="roles/owner"
+```
+
+#### 5. Virtual Environment Issues
+```bash
+# Error: Virtual environment not found
+# Solution: Create venv in each service directory
+cd agent_api && python3.11 -m venv .venv && source .venv/bin/activate
+cd ../backend_api && python3.11 -m venv venv && source venv/bin/activate
+```
+
+#### 6. Port Already in Use (Local Development)
+```bash
+# Error: Port 8000/8001/3000 already in use
+# Solution: Kill existing processes
+lsof -ti:8000 | xargs kill -9  # Kill process on port 8000
+lsof -ti:8001 | xargs kill -9  # Kill process on port 8001
+lsof -ti:3000 | xargs kill -9  # Kill process on port 3000
+```
+
+#### 7. Firestore Not Initialized
+```bash
+# Error: Firestore database not found
+# Solution: Create Firestore database
+gcloud firestore databases create --location=us-central1
+```
+
+#### 8. Environment Variables Not Set
+```bash
+# Error: GCP_PROJECT_ID not set
+# Solution: Source the .env file
+source .env
+# Or set directly
+export GCP_PROJECT_ID="your-project-id"
+```
+
+### Verify Deployment
+
+After deployment, verify all services are running:
+
+```bash
+# Check service status
+./deploy.sh status
+
+# Test each service endpoint
+curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-agent-api --region=us-central1 --format="value(status.url)")/docs
+curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-backend-api --region=us-central1 --format="value(status.url)")/health
+curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-frontend --region=us-central1 --format="value(status.url)")
+
+# View logs if issues occur
+gcloud run services logs read bigquery-optimizer-agent-api --region=us-central1 --limit=50
+gcloud run services logs read bigquery-optimizer-backend-api --region=us-central1 --limit=50
+gcloud run services logs read bigquery-optimizer-frontend --region=us-central1 --limit=50
 ```
 
 ## Required Permissions

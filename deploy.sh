@@ -140,9 +140,13 @@ print_info() {
 deploy_agent_api() {
     print_header "Deploying Agent API Service with ADK"
     
-    # IMPORTANT: Must be in agent_api directory for ADK to find root_agent
+    # Store current directory
+    CURRENT_DIR=$(pwd)
+    
+    # Change to agent_api directory
     cd agent_api
     
+    # Check for virtual environment and activate it
     print_info "Checking for virtual environment..."
     if [ -d ".venv" ]; then
         source .venv/bin/activate
@@ -151,40 +155,47 @@ deploy_agent_api() {
         exit 1
     fi
     
-    print_info "Deploying with ADK from agent_api directory..."
-    print_info "Current directory: $(pwd)"
+    print_info "Deploying ADK service from agent_api directory..."
+    print_info "Project: $PROJECT_ID"
+    print_info "Region: $REGION"
+    print_info "Service: $AGENT_API_SERVICE"
     
-    # Deploy from within agent_api folder - this is critical for ADK to find root_agent
-    # Note: ADK doesn't support --set-env-vars, so we'll add AGENT as the last argument
-    print_info "Deploying ADK service (environment variables will be set after deployment)..."
-    
+    # ADK deployment command based on documentation
+    # When run from within agent_api folder, we use app as the agent path
+    # No app_name parameter since root_agent is at the root level
     adk deploy cloud_run \
         --project=$PROJECT_ID \
         --region=$REGION \
         --service_name=$AGENT_API_SERVICE \
-        --with_ui \
-        --port=8000 \
         --allow_origins="*" \
-        .
+        --with_ui \
+        app
     
-    # Now set environment variables using gcloud
-    print_info "Setting environment variables for Agent API..."
-    gcloud run services update $AGENT_API_SERVICE \
-        --region=$REGION \
-        --project=$PROJECT_ID \
-        --set-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,BQ_PROJECT_ID=$BQ_PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_LOCATION=$BQ_LOCATION,APP_ENV=$APP_ENV,BACKEND_API_URL=https://${BACKEND_API_SERVICE}-${REGION}.a.run.app"
+    # Check if deployment was successful
+    if [ $? -eq 0 ]; then
+        # Set environment variables after successful deployment
+        print_info "Setting environment variables for Agent API..."
+        gcloud run services update $AGENT_API_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --set-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,BQ_PROJECT_ID=$BQ_PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_LOCATION=$BQ_LOCATION,APP_ENV=$APP_ENV,BACKEND_API_URL=https://${BACKEND_API_SERVICE}-${REGION}.a.run.app"
+        
+        # Get the service URL
+        AGENT_API_URL=$(gcloud run services describe $AGENT_API_SERVICE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --format='value(status.url)')
+        
+        print_success "Agent API deployed at: $AGENT_API_URL"
+        print_info "ADK UI available at: $AGENT_API_URL/app/"
+        print_info "API Docs available at: $AGENT_API_URL/docs"
+    else
+        print_error "ADK deployment failed"
+        exit 1
+    fi
     
-    AGENT_API_URL=$(gcloud run services describe $AGENT_API_SERVICE \
-        --region=$REGION \
-        --project=$PROJECT_ID \
-        --format='value(status.url)')
-    
-    print_success "Agent API deployed at: $AGENT_API_URL"
-    print_info "ADK UI available at: $AGENT_API_URL/app/"
-    print_info "API Docs available at: $AGENT_API_URL/docs"
-    
-    # Return to root directory
-    cd ..
+    # Return to original directory
+    cd $CURRENT_DIR
 }
 
 # Deploy Backend API Function (with Firestore agent_api)
