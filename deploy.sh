@@ -155,8 +155,9 @@ deploy_agent_api() {
     print_info "Current directory: $(pwd)"
     
     # Deploy from within agent_api folder - this is critical for ADK to find root_agent
-    # Pass all environment variables to the service
-    # Note: No app_name parameter needed, just deploy from current directory
+    # Note: ADK doesn't support --set-env-vars, so we'll add AGENT as the last argument
+    print_info "Deploying ADK service (environment variables will be set after deployment)..."
+    
     adk deploy cloud_run \
         --project=$PROJECT_ID \
         --region=$REGION \
@@ -164,6 +165,13 @@ deploy_agent_api() {
         --with_ui \
         --port=8000 \
         --allow_origins="*" \
+        .
+    
+    # Now set environment variables using gcloud
+    print_info "Setting environment variables for Agent API..."
+    gcloud run services update $AGENT_API_SERVICE \
+        --region=$REGION \
+        --project=$PROJECT_ID \
         --set-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,BQ_PROJECT_ID=$BQ_PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_LOCATION=$BQ_LOCATION,APP_ENV=$APP_ENV,BACKEND_API_URL=https://${BACKEND_API_SERVICE}-${REGION}.a.run.app"
     
     AGENT_API_URL=$(gcloud run services describe $AGENT_API_SERVICE \

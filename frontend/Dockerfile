@@ -11,7 +11,7 @@ RUN npm ci
 COPY . .
 
 # Build the app with production API URLs
-ENV VITE_API_URL=https://bigquery-optimizer-backend-puql6kbaxq-uc.a.run.app
+ENV VITE_API_URL=https://bigquery-optimizer-agent-api-puql6kbaxq-uc.a.run.app
 ENV VITE_BQ_API_URL=https://bq-api-puql6kbaxq-uc.a.run.app
 RUN npm run build
 
