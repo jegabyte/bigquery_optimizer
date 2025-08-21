@@ -19,6 +19,7 @@ import {
 } from 'react-icons/fi';
 import TemplatesGrid from './TemplatesGrid';
 import TemplateDetails from './TemplateDetails';
+import TableAnalysis from './TableAnalysis';
 import { formatCost } from '../../services/projectsMockData';
 import { projectsApiService } from '../../services/projectsApiService';
 import { optimizeQueryWithADK } from '../../services/adk';
@@ -48,28 +49,36 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
         const templatesData = await projectsApiService.getProjectTemplates(project.projectId);
         
         if (!mounted) return; // Check again after async operation
+        
+        // Ensure templatesData is an array
+        const templates = Array.isArray(templatesData) ? templatesData : (templatesData?.templates || []);
+        
         // Convert date strings to Date objects for the component
-        const templatesWithDates = templatesData.map(template => {
+        const templatesWithDates = templates.map(template => {
           const templateWithDate = {
             ...template,
-            firstSeen: template.firstSeen ? new Date(template.firstSeen) : null,
-            lastSeen: template.lastSeen ? new Date(template.lastSeen) : null
+            id: template.id || template.template_id, // Map template_id to id
+            firstSeen: template.firstSeen || template.first_seen ? new Date(template.firstSeen || template.first_seen) : null,
+            lastSeen: template.lastSeen || template.last_seen ? new Date(template.lastSeen || template.last_seen) : null
           };
           
-          // Check if template has analysis result from Firestore
-          if (template.analysisResult) {
-            // Template already has analysis from Firestore
-            console.log('Template has analysis result:', template.id, template.analysisResult);
+          // Check if template has analysis result from backend
+          const analysisResult = template.analysisResult || template.analysis_result;
+          if (analysisResult) {
+            // Template already has analysis from backend
+            console.log('Template has analysis result:', templateWithDate.id, analysisResult);
             setAnalysisResults(prev => ({
               ...prev,
-              [template.id]: template.analysisResult
+              [templateWithDate.id]: analysisResult
             }));
             setAnalysisStatuses(prev => ({
               ...prev,
-              [template.id]: template.analysisStatus || 'completed'
+              [templateWithDate.id]: 'completed'
             }));
             templateWithDate.state = 'analyzed';
-            templateWithDate.complianceScore = template.analysisResult.metadata?.optimizationScore;
+            templateWithDate.complianceScore = template.compliance_score || 
+                                                template.optimization_score || 
+                                                analysisResult.metadata?.optimizationScore;
           } else {
             // Template has no analysis yet - set status to 'new' or use existing status
             setAnalysisStatuses(prev => ({
@@ -117,23 +126,28 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       // If only one template selected, open the drawer
       if (templateIds.length === 1) {
         const templateId = templateIds[0];
-        const template = templates.find(t => t.id === templateId);
+        const template = templates.find(t => t.id === templateId || t.template_id === templateId);
+        const fullSql = template?.fullSql || template?.full_sql || template?.sql_pattern;
         
-        if (!template || !template.fullSql) {
+        if (!template || !fullSql) {
+          console.error('Template or SQL not found:', { templateId, template });
           toast.error('Template SQL not found');
           return;
         }
         
+        // Use the template's actual ID for consistency
+        const actualTemplateId = template.id || template.template_id;
+        
         // Mark as analyzing and set status
-        setAnalyzingTemplates(prev => new Set([...prev, templateId]));
-        setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'analyzing' }));
+        setAnalyzingTemplates(prev => new Set([...prev, actualTemplateId]));
+        setAnalysisStatuses(prev => ({ ...prev, [actualTemplateId]: 'analyzing' }));
         
         // Open the template drawer
         setSelectedTemplate(template);
         setIsTemplateDrawerOpen(true);
         
-        // Run single analysis
-        await analyzeTemplate(templateId, template);
+        // Run single analysis with the actual template ID
+        await analyzeTemplate(actualTemplateId, template);
       } else {
         // Multiple templates selected - run in parallel without opening drawers
         toast.loading(`Starting analysis for ${templateIds.length} templates...`, { 
@@ -148,16 +162,20 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
         
         // Create analysis promises for all selected templates
         const analysisPromises = templateIds.map(async (templateId) => {
-          const template = templates.find(t => t.id === templateId);
+          const template = templates.find(t => t.id === templateId || t.template_id === templateId);
+          const fullSql = template?.fullSql || template?.full_sql || template?.sql_pattern;
           
-          if (!template || !template.fullSql) {
-            console.error(`Template ${templateId} SQL not found`);
+          if (!template || !fullSql) {
+            console.error(`Template ${templateId} SQL not found`, { template });
             return { templateId, error: 'Template SQL not found' };
           }
           
+          // Use the template's actual ID for consistency
+          const actualTemplateId = template.id || template.template_id;
+          
           try {
-            const result = await analyzeTemplate(templateId, template);
-            return { templateId, result };
+            const result = await analyzeTemplate(actualTemplateId, template);
+            return { templateId: actualTemplateId, result };
           } catch (error) {
             console.error(`Analysis error for template ${templateId}:`, error);
             return { templateId, error: error.message };
@@ -195,11 +213,21 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
       // Create a unique session ID for this analysis
       const sessionId = `template_${templateId}_${Date.now()}`;
       
+      // Get the full SQL from template with fallback property names
+      const fullSql = template.fullSql || template.full_sql || template.sql_pattern;
+      
+      if (!fullSql) {
+        throw new Error('Template SQL not found');
+      }
+      
+      // Get tables from template with fallback property names
+      const tables = template.tables || template.tables_used || [];
+      
       // Call the ADK optimization service
-      const result = await optimizeQueryWithADK(template.fullSql, {
+      const result = await optimizeQueryWithADK(fullSql, {
         sessionId: sessionId,
         projectId: project.projectId,
-        datasetId: template.tables?.[0]?.split('.')[0] || 'analytics',
+        datasetId: tables[0]?.split('.')[0] || 'analytics',
         userId: 'user_' + Date.now(),
         validate: true,
         onProgress: (event) => {
@@ -230,12 +258,12 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
         }));
         setAnalysisStatuses(prev => ({ ...prev, [templateId]: 'completed' }));
         
-        // Save to Firestore via API
+        // Save analysis results to backend
         try {
           await projectsApiService.saveTemplateAnalysis(project.projectId, templateId, result);
-          console.log(`Analysis result saved to Firestore for template ${templateId}`);
+          console.log(`Analysis result saved for template ${templateId}`);
         } catch (error) {
-          console.error('Failed to save analysis to Firestore:', error);
+          console.error('Failed to save analysis:', error);
           // Continue even if save fails - result is still in memory
         }
         
@@ -283,7 +311,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
   };
 
   const tabs = [
-    { id: 'templates', label: 'Query Templates', count: templates.length },
+    { id: 'templates', label: 'Query Analysis', count: templates.length },
+    { id: 'tables', label: 'Table Analysis' },
     { id: 'overview', label: 'Overview' },
     { id: 'settings', label: 'Settings' },
     { id: 'activity', label: 'Activity' }
@@ -566,6 +595,10 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
               Settings configuration will be available here.
             </p>
           </div>
+        )}
+
+        {activeTab === 'tables' && (
+          <TableAnalysis project={project} />
         )}
 
         {activeTab === 'activity' && (

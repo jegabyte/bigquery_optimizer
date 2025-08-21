@@ -13,12 +13,14 @@ from google.oauth2 import service_account
 load_dotenv()
 
 # Google Cloud Configuration
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3")
+GOOGLE_CLOUD_PROJECT = os.getenv("GCP_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3"))
 GOOGLE_GENAI_USE_VERTEXAI = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "True").lower() == "true"
 
-# BigQuery Configuration
-BIGQUERY_DATASET = os.getenv("BIGQUERY_DATASET", "analytics")
-BIGQUERY_LOCATION = os.getenv("BIGQUERY_LOCATION", "US")
+# BigQuery Configuration  
+BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", GOOGLE_CLOUD_PROJECT)
+BQ_DATASET = os.getenv("BQ_DATASET", "bq_optimizer")
+BIGQUERY_DATASET = os.getenv("BIGQUERY_DATASET", BQ_DATASET)  # For backward compatibility
+BIGQUERY_LOCATION = os.getenv("BQ_LOCATION", os.getenv("BIGQUERY_LOCATION", "US"))
 
 # ADK Configuration
 ADK_LOG_LEVEL = os.getenv("ADK_LOG_LEVEL", "INFO")

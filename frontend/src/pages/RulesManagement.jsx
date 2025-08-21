@@ -12,7 +12,8 @@ import {
   FiXCircle,
   FiCopy,
   FiSave,
-  FiX
+  FiX,
+  FiLoader
 } from 'react-icons/fi';
 import { rulesService } from '../services/rulesService';
 import toast from 'react-hot-toast';
@@ -29,6 +30,7 @@ const RulesManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Form state for add/edit
   const [formData, setFormData] = useState({
@@ -140,19 +142,39 @@ const RulesManagement = () => {
         return;
       }
       
+      setIsSaving(true);
+      
       const newRule = {
         ...formData,
         order: rules.length
       };
       
-      await rulesService.addRule(newRule);
+      const addedRule = await rulesService.addRule(newRule);
+      
+      // Add to local state
+      const updatedRules = [...rules, addedRule];
+      // Sort by order or alphabetically
+      updatedRules.sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) {
+          return a.order - b.order;
+        }
+        return a.title.localeCompare(b.title);
+      });
+      setRules(updatedRules);
+      
+      // Update categories if needed
+      if (addedRule.category && !categories.includes(addedRule.category)) {
+        setCategories([...categories, addedRule.category].sort());
+      }
+      
       toast.success('Rule added successfully');
       setShowAddModal(false);
       resetForm();
-      fetchRules();
+      setIsSaving(false);
     } catch (error) {
       console.error('Error adding rule:', error);
       toast.error('Failed to add rule');
+      setIsSaving(false);
     }
   };
 
@@ -163,15 +185,26 @@ const RulesManagement = () => {
         return;
       }
       
-      await rulesService.updateRule(editingRule.docId || editingRule.id, formData);
+      setIsSaving(true);
+      
+      const updatedRule = await rulesService.updateRule(editingRule.docId || editingRule.id, formData);
+      
+      // Update local state with the returned rule
+      const updatedRules = rules.map(r => 
+        (r.docId || r.id) === (editingRule.docId || editingRule.id) 
+          ? { ...updatedRule, docId: updatedRule.docId || editingRule.docId } 
+          : r
+      );
+      setRules(updatedRules);
       
       toast.success('Rule updated successfully');
       setShowEditModal(false);
       resetForm();
-      fetchRules();
+      setIsSaving(false);
     } catch (error) {
       console.error('Error updating rule:', error);
       toast.error('Failed to update rule');
+      setIsSaving(false);
     }
   };
 
@@ -180,25 +213,40 @@ const RulesManagement = () => {
       return;
     }
     
+    // Optimistically remove from UI
+    const filteredRules = rules.filter(r => 
+      (r.docId || r.id) !== (rule.docId || rule.id)
+    );
+    setRules(filteredRules);
+    
     try {
       await rulesService.deleteRule(rule.docId || rule.id);
       toast.success('Rule deleted successfully');
-      fetchRules();
     } catch (error) {
       console.error('Error deleting rule:', error);
       toast.error('Failed to delete rule');
+      // Revert on error
+      setRules(rules);
     }
   };
 
   const handleToggleRule = async (rule) => {
+    // Optimistically update the UI
+    const updatedRules = rules.map(r => 
+      (r.docId || r.id) === (rule.docId || rule.id) 
+        ? { ...r, enabled: !r.enabled } 
+        : r
+    );
+    setRules(updatedRules);
+    
     try {
       await rulesService.toggleRule(rule.docId || rule.id, !rule.enabled);
-      
       toast.success(`Rule ${!rule.enabled ? 'enabled' : 'disabled'}`);
-      fetchRules();
     } catch (error) {
       console.error('Error toggling rule:', error);
       toast.error('Failed to toggle rule');
+      // Revert on error
+      setRules(rules);
     }
   };
 
@@ -231,6 +279,7 @@ const RulesManagement = () => {
       fix: rule.fix,
       examples: rule.examples || { bad: [], good: [] }
     });
+    setIsSaving(false);
     setShowEditModal(true);
   };
 
@@ -625,17 +674,35 @@ const RulesManagement = () => {
                     setShowAddModal(false);
                     setShowEditModal(false);
                     resetForm();
+                    setIsSaving(false);
                   }}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+                  disabled={isSaving}
+                  className={`px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 ${
+                    isSaving ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={showAddModal ? handleAddRule : handleUpdateRule}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                  disabled={isSaving}
+                  className={`px-4 py-2 bg-blue-600 text-white rounded-lg transition-colors flex items-center space-x-2 ${
+                    isSaving 
+                      ? 'opacity-75 cursor-not-allowed' 
+                      : 'hover:bg-blue-700'
+                  }`}
                 >
-                  <FiSave className="h-5 w-5" />
-                  <span>{showAddModal ? 'Add Rule' : 'Update Rule'}</span>
+                  {isSaving ? (
+                    <>
+                      <FiLoader className="h-5 w-5 animate-spin" />
+                      <span>{showAddModal ? 'Adding...' : 'Updating...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <FiSave className="h-5 w-5" />
+                      <span>{showAddModal ? 'Add Rule' : 'Update Rule'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>

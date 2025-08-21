@@ -25,18 +25,19 @@ const QueryAnalysis = () => {
       
       for (const analysis of firestoreAnalyses) {
         const analysisData = {
-          id: analysis.id,
-          query: analysis.query,
+          id: analysis.id || analysis.analysis_id,
+          query: analysis.query || analysis.original_query || analysis.result?.query || '',
           timestamp: analysis.timestamp || analysis.created_at || new Date().toISOString(),
           status: analysis.result?.error ? 'error' : 'completed',
-          issues: analysis.result?.issues?.length || 0,
-          costReduction: analysis.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || 
+          issues: analysis.issues_found?.length || analysis.result?.issues?.length || 0,
+          costReduction: analysis.savings_percentage ? `${analysis.savings_percentage}%` :
+                         analysis.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || 
                          (analysis.result?.validationResult?.costSavings ? `${analysis.result.validationResult.costSavings}%` : '0%'),
-          optimized: !!analysis.result?.optimizedQuery,
+          optimized: analysis.optimization_applied || !!analysis.optimized_query || !!analysis.result?.optimizedQuery,
           performance: analysis.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 
                       analysis.result?.metadata?.stages?.report?.executive_summary?.performance_gain || 'N/A',
           dataReduction: analysis.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A',
-          source: 'firestore'
+          source: 'bigquery'
         };
         
         allAnalyses.push(analysisData);
@@ -93,7 +94,8 @@ const QueryAnalysis = () => {
 
   // Filter and sort analyses
   let filteredAnalyses = analyses.filter(analysis => {
-    const matchesSearch = analysis.query.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = analysis.query || '';
+    const matchesSearch = query.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || 
       (filterStatus === 'completed' && analysis.status === 'completed') ||
       (filterStatus === 'error' && analysis.status === 'error') ||
@@ -108,8 +110,8 @@ const QueryAnalysis = () => {
     filteredAnalyses.sort((a, b) => b.issues - a.issues);
   } else if (sortBy === 'cost') {
     filteredAnalyses.sort((a, b) => {
-      const aCost = parseInt(a.costReduction.replace('%', '')) || 0;
-      const bCost = parseInt(b.costReduction.replace('%', '')) || 0;
+      const aCost = parseInt((a.costReduction || '0%').replace('%', '')) || 0;
+      const bCost = parseInt((b.costReduction || '0%').replace('%', '')) || 0;
       return bCost - aCost;
     });
   }

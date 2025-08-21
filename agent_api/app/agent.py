@@ -10,36 +10,56 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
-from app.bigquery_metadata import fetch_tables_metadata, bigquery_dry_run
-from app.callbacks import create_streaming_callback
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Try to import firestore_rules, but don't fail if it's not available
+from .bigquery_metadata import fetch_tables_metadata, bigquery_dry_run
+from .callbacks import create_streaming_callback
+
+# Try to import BigQuery rules first, then fallback to Firestore
 try:
-    from app.firestore_rules import fetch_rules_from_firestore
+    from .bigquery_rules import fetch_rules_from_bigquery
+    logger.info("BigQuery rules loader available")
+    fetch_rules_from_bigquery_available = True
+except ImportError as e:
+    logger.warning(f"Could not import bigquery_rules: {e}")
+    fetch_rules_from_bigquery = None
+    fetch_rules_from_bigquery_available = False
+
+# Fallback to Firestore if BigQuery not available
+try:
+    from .firestore_rules import fetch_rules_from_firestore
+    logger.info("Firestore rules loader available (fallback)")
 except ImportError as e:
     logger.warning(f"Could not import firestore_rules: {e}")
     fetch_rules_from_firestore = None
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # --- Configuration ---
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3")
+PROJECT_ID = os.getenv("BQ_PROJECT_ID", os.getenv("GCP_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3")))
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-DATASET = os.getenv("BIGQUERY_DATASET", "analytics")
+DATASET = os.getenv("BQ_DATASET", os.getenv("BIGQUERY_DATASET", "bq_optimizer"))
 
 # --- Load Rules ---
 def load_bq_anti_patterns():
-    """Load BigQuery anti-patterns from Firestore (primary) or YAML file (fallback)"""
-    # Try to load from Firestore first if available
+    """Load BigQuery anti-patterns from BigQuery (primary), Firestore (secondary), or YAML file (fallback)"""
+    # Try to load from BigQuery first
+    if fetch_rules_from_bigquery_available and fetch_rules_from_bigquery is not None:
+        try:
+            patterns_content = fetch_rules_from_bigquery(PROJECT_ID)
+            logger.info("✅ Loaded BigQuery anti-patterns from BigQuery table")
+            return patterns_content
+        except Exception as bq_error:
+            logger.warning(f"⚠️  Failed to load from BigQuery: {bq_error}")
+    
+    # Try Firestore as second option
     if fetch_rules_from_firestore is not None:
         try:
             patterns_content = fetch_rules_from_firestore(PROJECT_ID)
             logger.info("✅ Loaded BigQuery anti-patterns from Firestore")
             return patterns_content
         except Exception as firestore_error:
-            logger.warning(f"⚠️  Failed to load from Firestore: {firestore_error}, trying YAML file")
+            logger.warning(f"⚠️  Failed to load from Firestore: {firestore_error}")
         # Fallback to YAML file
         patterns_path = os.path.join(os.path.dirname(__file__), 'bq_anti_patterns.yaml')
         try:

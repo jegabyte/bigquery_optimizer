@@ -10,6 +10,7 @@ from datetime import datetime
 import os
 import json
 import logging
+from config import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +32,8 @@ class FirestoreService:
                     )
                     self.db = firestore.Client(
                         credentials=credentials,
-                        project='aiva-e74f3',
-                        database='bq-optimization'
+                        project=config.FIRESTORE_PROJECT_ID,
+                        database=config.FIRESTORE_DATABASE or 'bq-optimization'
                     )
                     logger.info("✅ Firestore client initialized with service account")
                 except Exception as e:
@@ -47,14 +48,14 @@ class FirestoreService:
                             del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
                     
                     self.db = firestore.Client(
-                        project='aiva-e74f3',
-                        database='bq-optimization'
+                        project=config.FIRESTORE_PROJECT_ID,
+                        database=config.FIRESTORE_DATABASE or 'bq-optimization'
                     )
                     logger.info("✅ Firestore client initialized with default credentials")
                 except Exception as e:
                     logger.error(f"Failed to use default credentials: {e}")
                     # Try without specifying database (use default)
-                    self.db = firestore.Client(project='aiva-e74f3')
+                    self.db = firestore.Client(project=config.FIRESTORE_PROJECT_ID)
                     logger.info("✅ Firestore client initialized with default database")
             
             # Collection references

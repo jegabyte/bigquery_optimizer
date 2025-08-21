@@ -71,11 +71,40 @@ const Projects = () => {
     // TODO: Open edit modal
   };
 
-  const handleRemoveProject = (projectId) => {
-    if (confirm('Are you sure you want to remove this project integration?')) {
-      setProjects(projects.filter(p => p.id !== projectId));
-      if (selectedProject?.id === projectId) {
-        setSelectedProject(null);
+  const handleRemoveProject = async (projectId) => {
+    if (confirm('Are you sure you want to remove this project? This will delete all associated templates and analyses.')) {
+      const loadingToast = toast.loading('Deleting project...');
+      
+      try {
+        const response = await fetch(`${import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8001'}/api/projects/${projectId}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to delete project');
+        }
+        
+        const result = await response.json();
+        
+        toast.dismiss(loadingToast);
+        toast.success('Project deleted successfully');
+        
+        // Update local state - check all possible ID fields
+        setProjects(projects.filter(p => p.projectId !== projectId && p.project_id !== projectId && p.id !== projectId));
+        if (selectedProject?.projectId === projectId || selectedProject?.project_id === projectId || selectedProject?.id === projectId) {
+          setSelectedProject(null);
+        }
+        
+        // Refresh projects list
+        const data = await projectsApiService.getProjects();
+        setProjects(data);
+      } catch (error) {
+        toast.dismiss(loadingToast);
+        toast.error('Failed to delete project: ' + error.message);
+        console.error('Delete project error:', error);
       }
     }
   };
@@ -88,52 +117,27 @@ const Projects = () => {
   const handleOnboardingComplete = async (newProject) => {
     console.log('New project configuration:', newProject);
     
-    // Show loading toast
-    const loadingToast = toast.loading('Creating project and fetching data from INFORMATION_SCHEMA...');
-    
+    // The project is already created by ProjectOnboarding component
+    // Refresh the projects list
     try {
-      // Create the project via API (this will scan INFORMATION_SCHEMA and create templates)
-      const projectConfig = {
-        project_id: newProject.projectId,
-        display_name: newProject.name || newProject.projectId,
-        analysis_window: newProject.analysisWindow || 30,
-        regions: newProject.regions || [],
-        datasets: newProject.datasets || [],
-        pricing_mode: newProject.pricingMode || 'on-demand',
-        price_per_tb: newProject.pricePerTB || 5.00,
-        auto_detect_regions: newProject.autoDetectRegions !== false,
-        auto_detect_datasets: newProject.autoDetectDatasets !== false
-      };
+      const data = await projectsApiService.getProjects();
+      setProjects(data);
+      setIsOnboardingOpen(false);
       
-      const result = await projectsApiService.createProject(projectConfig);
-      
-      toast.dismiss(loadingToast);
-      
-      if (result.success) {
-        // Show success with scan results
-        const scanResult = result.scan_result;
-        toast.success(
-          `Project created! Found ${scanResult.templates_discovered} query templates from ${scanResult.total_queries_analyzed} queries`,
-          { duration: 5000 }
-        );
-        
-        // Reload projects list to include the new project
-        await loadProjects();
-        
-        setIsOnboardingOpen(false);
-        
-        // Find and select the newly created project
-        const createdProject = projects.find(p => p.projectId === newProject.projectId);
-        if (createdProject) {
-          setSelectedProject(createdProject);
-        }
-      } else {
-        toast.error('Failed to create project');
+      // If this is called after background scan completes, refresh again
+      if (newProject?.refresh) {
+        setTimeout(async () => {
+          try {
+            const refreshedData = await projectsApiService.getProjects();
+            setProjects(refreshedData);
+          } catch (error) {
+            console.error('Failed to refresh after scan:', error);
+          }
+        }, 1000);
       }
     } catch (error) {
-      toast.dismiss(loadingToast);
-      console.error('Error creating project:', error);
-      toast.error(error.message || 'Failed to create project. Please check your permissions.');
+      console.error('Failed to refresh projects:', error);
+      setIsOnboardingOpen(false);
     }
   };
 
@@ -313,7 +317,7 @@ const Projects = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
         <div className="mb-3">
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-            Integrated Projects ({projects.length})
+            Analyzed Projects ({projects.length})
           </h2>
         </div>
         
@@ -349,7 +353,7 @@ const Projects = () => {
           <div className="text-center py-8 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <FiActivity className="mx-auto h-10 w-10 text-gray-400" />
             <h3 className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">
-              No projects integrated yet
+              No projects analyzed yet
             </h3>
             <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
               Get started by adding your first GCP project to discover and optimize query templates.

@@ -3,7 +3,7 @@
  * Fetches real BigQuery statistics for the dashboard
  */
 
-const API_BASE_URL = import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001';
 
 class DashboardApiService {
   constructor() {

@@ -1,10 +1,10 @@
 /**
  * Service for managing analysis results persistence
- * Stores and retrieves analysis results from localStorage
- * In production, this should be stored in Firestore
+ * Stores and retrieves analysis results from BigQuery via Backend API
  */
 
 const STORAGE_KEY = 'bq_template_analysis_results';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001';
 
 export const analysisService = {
   /**
@@ -126,7 +126,7 @@ export const analysisService = {
       if (filters.user_id) params.append('user_id', filters.user_id);
       params.append('limit', limit);
       
-      const response = await fetch(`http://localhost:8001/api/analyses?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/api/analyses?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -165,58 +165,124 @@ export const analysisService = {
   },
 
   /**
-   * Get analysis from Firestore by ID
-   * This is a placeholder that returns null for now
+   * Get analysis from Backend API by ID (fetches from BigQuery)
    */
   getAnalysisFromFirestore: async (analysisId) => {
     try {
-      // In production, this should call the Firestore API
-      // For now, try to find it in localStorage
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return null;
+      // Fetch from backend API which gets from BigQuery
+      const response = await fetch(`${API_BASE_URL}/api/analyses/${analysisId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit'
+      });
       
-      const data = JSON.parse(stored);
-      
-      // Search through all projects and templates for the analysis
-      for (const projectId in data) {
-        for (const templateId in data[projectId]) {
-          const analysis = data[projectId][templateId];
-          if (`${projectId}_${templateId}` === analysisId) {
-            return {
-              id: analysisId,
-              query: analysis.result?.query || '',
-              timestamp: analysis.timestamp,
-              result: analysis.result,
-              project_id: projectId,
-              template_id: templateId
-            };
-          }
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      return null;
+      const analysis = await response.json();
+      
+      // Format the response to match expected structure
+      return {
+        id: analysis.analysis_id || analysisId,
+        query: analysis.original_query || analysis.query || '',
+        timestamp: analysis.created_at || analysis.timestamp,
+        result: {
+          query: analysis.original_query || '',
+          optimizedQuery: analysis.optimized_query || '',
+          issues: analysis.issues_found || [],
+          validationResult: {
+            costSavings: analysis.savings_percentage ? `${analysis.savings_percentage}%` : '0%',
+            bytesProcessedOriginal: analysis.original_bytes_processed,
+            bytesProcessedOptimized: analysis.optimized_bytes_processed,
+            bytesSaved: analysis.bytes_saved
+          },
+          metadata: {
+            stages: analysis.stage_data || {}
+          }
+        },
+        project_id: analysis.project_id,
+        stage_data: analysis.stage_data || {},
+        options: {
+          projectId: analysis.project_id,
+          validate: true,
+          rewrite: true,
+          projectName: 'Optimization Project'
+        }
+      };
     } catch (error) {
-      console.error('Failed to get analysis from Firestore:', error);
+      console.error('Failed to get analysis from Backend API:', error);
+      
+      // Fallback to localStorage
+      const stored = localStorage.getItem(`analysis-result-${analysisId}`);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+      
       return null;
     }
   },
 
   /**
-   * Save analysis to Firestore
-   * This is a placeholder that saves to localStorage for now
+   * Save analysis to Backend API (which saves to BigQuery)
    */
   saveAnalysisToFirestore: async (analysisData) => {
     try {
-      // In production, this should call the Firestore API to save the analysis
-      // For now, save to localStorage as a backup
-      const { project_id, template_id, result } = analysisData;
+      const { query, result, projectId, project_id } = analysisData;
       
-      if (project_id && template_id) {
-        // Use the existing saveAnalysisResult method
-        return analysisService.saveAnalysisResult(project_id, template_id, result);
+      // Use projectId or project_id
+      const finalProjectId = projectId || project_id || 'default';
+      
+      // Call the backend API to save to BigQuery
+      const response = await fetch(`${API_BASE_URL}/api/analyses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify({
+          query: query || result?.query || '',
+          project_id: finalProjectId,
+          result: result,
+          analysis_type: 'optimization',
+          created_by: 'user@example.com', // TODO: Get from auth
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      const savedAnalysis = await response.json();
+      console.log('Analysis saved to BigQuery:', savedAnalysis);
       
-      // If no project_id/template_id, create a standalone analysis entry
+      // Also save to localStorage as backup
+      const stored = localStorage.getItem('standalone_analyses') || '{}';
+      const data = JSON.parse(stored);
+      const analysisId = savedAnalysis.analysis_id || `analysis_${Date.now()}`;
+      
+      data[analysisId] = {
+        ...analysisData,
+        id: analysisId,
+        timestamp: new Date().toISOString()
+      };
+      
+      localStorage.setItem('standalone_analyses', JSON.stringify(data));
+      
+      return { 
+        success: true, 
+        id: analysisId,
+        analysis_id: savedAnalysis.analysis_id 
+      };
+    } catch (error) {
+      console.error('Failed to save analysis to BigQuery:', error);
+      
+      // Fallback to localStorage if API fails
       const stored = localStorage.getItem('standalone_analyses') || '{}';
       const data = JSON.parse(stored);
       const analysisId = `analysis_${Date.now()}`;
@@ -228,10 +294,70 @@ export const analysisService = {
       };
       
       localStorage.setItem('standalone_analyses', JSON.stringify(data));
-      return { success: true, id: analysisId };
+      return { success: true, id: analysisId, error: error.message };
+    }
+  },
+
+  /**
+   * Get recent analyses from Backend API
+   */
+  getRecentAnalysesFromAPI: async (limit = 100, projectId = null) => {
+    try {
+      const params = new URLSearchParams({ limit: limit.toString() });
+      if (projectId) params.append('project_id', projectId);
+      
+      const response = await fetch(`${API_BASE_URL}/api/analyses?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const analyses = await response.json();
+      return analyses;
     } catch (error) {
-      console.error('Failed to save analysis to Firestore:', error);
-      return { success: false, error: error.message };
+      console.error('Failed to get recent analyses from Backend API:', error);
+      // Fallback to localStorage if API fails
+      return analysisService.getAllAnalysisResults();
+    }
+  },
+
+  /**
+   * Create new analysis via Backend API
+   */
+  createAnalysis: async (query, projectId, templateId = null) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/analyses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify({
+          query: query,
+          project_id: projectId,
+          template_id: templateId,
+          analysis_type: 'manual',
+          created_by: 'user@example.com' // TODO: Get from auth
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Failed to create analysis:', error);
+      throw error;
     }
   }
 };

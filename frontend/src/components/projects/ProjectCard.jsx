@@ -44,28 +44,28 @@ const ProjectCard = ({ project, onRefresh, onEdit, onRemove, onPause }) => {
         </div>
         <div className="flex items-center space-x-2">
           <button
-            onClick={() => onRefresh(project.id)}
+            onClick={() => onRefresh(project.projectId || project.project_id)}
             className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             title="Refresh"
           >
             <FiRefreshCw className="h-4 w-4" />
           </button>
           <button
-            onClick={() => onEdit(project.id)}
+            onClick={() => onEdit(project.projectId || project.project_id)}
             className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             title="Edit Settings"
           >
             <FiSettings className="h-4 w-4" />
           </button>
           <button
-            onClick={() => onPause(project.id)}
+            onClick={() => onPause(project.projectId || project.project_id)}
             className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             title="Pause Collection"
           >
             <FiPause className="h-4 w-4" />
           </button>
           <button
-            onClick={() => onRemove(project.id)}
+            onClick={() => onRemove(project.projectId || project.project_id)}
             className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
             title="Remove"
           >
@@ -146,36 +146,6 @@ const ProjectCard = ({ project, onRefresh, onEdit, onRemove, onPause }) => {
           </div>
         </div>
       )}
-
-      {/* Top Cost Drivers */}
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-          Top 5 Cost Drivers
-        </h4>
-        <div className="space-y-2">
-          {project.topCostDrivers.map((driver, index) => (
-            <div key={index} className="flex items-center justify-between text-xs">
-              <div className="flex items-center space-x-2 flex-1 min-w-0">
-                <span className="text-gray-400 dark:text-gray-500 w-4">{index + 1}.</span>
-                <span className="text-gray-700 dark:text-gray-300 truncate">
-                  {driver.name}
-                </span>
-              </div>
-              <div className="flex items-center space-x-3 ml-2">
-                <span className="text-gray-500 dark:text-gray-400">
-                  {driver.runs} runs
-                </span>
-                <span className="text-gray-600 dark:text-gray-300">
-                  {driver.bytesProcessed}
-                </span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {formatCost(driver.cost)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Settings Summary */}
       <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">

@@ -120,10 +120,12 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemp
 
   // Calculate costs for each template
   const getQueryCost = (bytesProcessed) => {
+    if (!bytesProcessed) return 0;
     return (bytesProcessed / 1e12) * 5.00; // $5 per TB
   };
 
   const getTotalCost = (bytesProcessed, runs) => {
+    if (!bytesProcessed || !runs) return 0;
     return getQueryCost(bytesProcessed) * runs;
   };
 
@@ -367,8 +369,10 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemp
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {filteredTemplates.map((template) => {
-              const queryCost = getQueryCost(template.bytesProcessedP90);
-              const totalCost = getTotalCost(template.bytesProcessedP90, template.runs);
+              const bytesProcessed = template.bytesProcessedP90 || template.p90_bytes_processed || template.total_bytes_processed || 0;
+              const runs = template.runs || template.total_runs || template.execution_count || 0;
+              const queryCost = getQueryCost(bytesProcessed);
+              const totalCost = getTotalCost(bytesProcessed, runs);
               const potentialSavings = totalCost * 0.3; // Assume 30% potential savings
               
               return (
@@ -391,10 +395,10 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemp
                     <div className="group relative">
                       <div>
                         <p className="text-xs text-gray-900 dark:text-gray-100 font-mono truncate">
-                          {template.sqlSnippet.substring(0, 50)}...
+                          {(template.sqlSnippet || template.sql_snippet || template.sql_pattern || 'No SQL snippet available').substring(0, 50)}...
                         </p>
                         <div className="flex items-center gap-1 mt-0.5">
-                          {template.tables.slice(0, 2).map((table, idx) => (
+                          {template.tables && template.tables.slice(0, 2).map((table, idx) => (
                             <span
                               key={idx}
                               className="inline-flex items-center px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
@@ -403,7 +407,7 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemp
                               {table.split('.').pop()}
                             </span>
                           ))}
-                          {template.tables.length > 2 && (
+                          {template.tables && template.tables.length > 2 && (
                             <span className="text-gray-400" style={{ fontSize: '9px' }}>
                               +{template.tables.length - 2}
                             </span>
@@ -420,20 +424,20 @@ const TemplatesGrid = ({ templates, onTemplateClick, onBulkAction, analyzingTemp
                   </td>
                   <td className="px-2 py-2 pl-1">
                     <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">
-                      {template.runs.toLocaleString()}
+                      {(template.runs || template.total_runs || template.execution_count || 0).toLocaleString()}
                     </p>
-                    {template.runs > 100 && (
+                    {(template.runs || template.total_runs || template.execution_count || 0) > 100 && (
                       <span className="text-red-600" style={{ fontSize: '9px' }}>High</span>
                     )}
                   </td>
                   <td className="px-2 py-2">
                     <p className="text-xs font-medium text-gray-900 dark:text-gray-100">
-                      {formatBytes(template.bytesProcessedP90)}
+                      {formatBytes(bytesProcessed)}
                     </p>
                   </td>
                   <td className="px-2 py-2">
                     <p className="text-xs text-gray-900 dark:text-gray-100">
-                      {formatRuntime(template.runtimeP50)}
+                      {formatRuntime(template.runtimeP50 || template.avg_runtime_seconds || 0)}
                     </p>
                   </td>
                   <td className="px-2 py-2">

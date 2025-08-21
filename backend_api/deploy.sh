@@ -2,9 +2,12 @@
 
 # BigQuery API Deployment Script
 
-PROJECT_ID="aiva-e74f3"
-SERVICE_NAME="bq-api"
-REGION="us-central1"
+# Configuration - use environment variables or defaults
+PROJECT_ID="${GCP_PROJECT_ID:-aiva-e74f3}"
+BQ_PROJECT_ID="${BQ_PROJECT_ID:-$PROJECT_ID}"
+BQ_DATASET="${BQ_DATASET:-bq_optimizer}"
+SERVICE_NAME="${SERVICE_NAME:-bq-api}"
+REGION="${REGION:-us-central1}"
 
 echo "Deploying BigQuery API to Google Cloud Run..."
 
@@ -23,7 +26,7 @@ gcloud run deploy ${SERVICE_NAME} \
   --platform managed \
   --region ${REGION} \
   --allow-unauthenticated \
-  --set-env-vars BQ_PROJECT_ID=${PROJECT_ID} \
+  --set-env-vars GCP_PROJECT_ID=${PROJECT_ID},BQ_PROJECT_ID=${BQ_PROJECT_ID},BQ_DATASET=${BQ_DATASET} \
   --memory 512Mi \
   --timeout 60 \
   --max-instances 10

@@ -4,7 +4,7 @@
  */
 
 // API base URL - update this when deployed
-const API_BASE_URL = import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001';
 
 class ProjectsApiService {
   constructor() {
@@ -33,6 +33,122 @@ class ProjectsApiService {
       data,
       timestamp: Date.now()
     });
+  }
+
+  /**
+   * Check permissions for a project
+   */
+  async checkPermission(projectId, permissionType) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/check-permissions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          permission_type: permissionType
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data.has_access || false;
+    } catch (error) {
+      console.error('Error checking permission:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Validate project access and get stats
+   */
+  async validateProjectAccess(config) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/validate-access`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error validating project access:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create project with INFORMATION_SCHEMA scanning
+   */
+  async createProject(config) {
+    try {
+      // First scan using INFORMATION_SCHEMA
+      const scanResponse = await fetch(`${this.baseUrl}/api/projects/scan-information-schema`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: config.projectId,
+          analysis_window: config.customDateRange 
+            ? { startDate: config.startDate, endDate: config.endDate }
+            : config.analysisWindow,
+          price_per_tb: config.pricePerTB
+        })
+      });
+      
+      if (!scanResponse.ok) {
+        throw new Error(`Scan failed! status: ${scanResponse.status}`);
+      }
+      
+      const scanResult = await scanResponse.json();
+      
+      // Then create the project
+      const createResponse = await fetch(`${this.baseUrl}/api/projects`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: config.projectId,
+          display_name: config.name || config.projectId,
+          analysis_window: config.analysisWindow,
+          regions: [],
+          datasets: [],
+          pricing_mode: config.pricingMode,
+          price_per_tb: config.pricePerTB,
+          auto_detect_regions: false,
+          auto_detect_datasets: false
+        })
+      });
+      
+      if (!createResponse.ok) {
+        throw new Error(`Create failed! status: ${createResponse.status}`);
+      }
+      
+      const createResult = await createResponse.json();
+      
+      // Clear cache
+      this.cache.clear();
+      
+      return {
+        ...createResult,
+        scan_result: scanResult
+      };
+    } catch (error) {
+      console.error('Error creating project:', error);
+      throw error;
+    }
   }
 
   /**
@@ -317,6 +433,61 @@ class ProjectsApiService {
       return data;
     } catch (error) {
       console.error('Error fetching analysis result:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Analyze project tables using INFORMATION_SCHEMA
+   */
+  async analyzeProjectTables(projectId, customTables = null) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/analyze-tables`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          custom_tables: customTables
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error analyzing tables:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get table analysis results for a project
+   */
+  async getTableAnalysis(projectId) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/table-analysis`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null; // No analysis found
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching table analysis:', error);
       return null;
     }
   }

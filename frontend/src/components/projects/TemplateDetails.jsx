@@ -36,12 +36,36 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
   useEffect(() => {
     if (template && isOpen) {
       // Use recent runs from the template data
-      setRuns(template.recentRuns || []);
+      setRuns(template.recentRuns || template.recent_runs || []);
       setActiveTab('overview');
     }
   }, [template, isOpen]);
 
   if (!template) return null;
+
+  // Helper function to get property with fallback names
+  const getProperty = (obj, ...keys) => {
+    for (const key of keys) {
+      if (obj && obj[key] !== undefined) {
+        return obj[key];
+      }
+    }
+    return null;
+  };
+
+  // Extract properties with fallback names
+  const templateRuns = getProperty(template, 'runs', 'total_runs', 'execution_count') || 0;
+  const fullSql = getProperty(template, 'fullSql', 'full_sql', 'sql_pattern') || '';
+  const sqlSnippet = getProperty(template, 'sqlSnippet', 'sql_snippet', 'sql_pattern') || '';
+  const tables = getProperty(template, 'tables', 'tables_used') || [];
+  const avgBytesProcessed = getProperty(template, 'avgBytesProcessed', 'avg_bytes_processed', 'total_bytes_processed') || 0;
+  const bytesProcessedP90 = getProperty(template, 'bytesProcessedP90', 'p90_bytes_processed') || 0;
+  const avgRuntime = getProperty(template, 'avgRuntime', 'avg_runtime_seconds', 'avgRuntimeSeconds') || 0;
+  const runtimeP50 = getProperty(template, 'runtimeP50', 'p50_runtime_seconds') || 0;
+  const runsPerDay = getProperty(template, 'runsPerDay', 'runs_per_day') || 0;
+  const avgCostPerRun = getProperty(template, 'avgCostPerRun', 'avg_cost_usd', 'avgCostUsd') || 0;
+  const totalCost = getProperty(template, 'totalCost', 'total_cost_usd', 'totalCostUsd') || 0;
+  const estimatedMonthlyCost = getProperty(template, 'estimatedMonthlyCost', 'estimated_monthly_cost') || 0;
 
   const getSeverityIcon = (severity) => {
     switch (severity) {
@@ -58,7 +82,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'runs', label: `Runs (${template.runs || 0})` },
+    { id: 'runs', label: `Runs (${templateRuns})` },
     { id: 'results', label: 'Results', disabled: !analysisResult && !template.lastAnalysis }
   ];
 
@@ -90,7 +114,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                   Query Template
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {template.runs} runs
+                  {templateRuns} runs
                 </p>
               </div>
               <button
@@ -136,7 +160,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                         height="200px"
                         language="sql"
                         theme={document.documentElement.classList.contains('dark') ? 'vs-dark' : 'light'}
-                        value={template.fullSql}
+                        value={fullSql}
                         options={{
                           readOnly: true,
                           minimap: { enabled: false },
@@ -147,7 +171,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                     </div>
                     <div className="flex items-center space-x-2 mt-2">
                       <button
-                        onClick={() => navigator.clipboard.writeText(template.fullSql)}
+                        onClick={() => navigator.clipboard.writeText(fullSql)}
                         className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
                       >
                         <FiCopy className="h-4 w-4" />
@@ -168,10 +192,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                           <span className="text-xs text-gray-500 dark:text-gray-400">Data Processed</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {formatBytes(template.avgBytesProcessed || 0)}
+                          {formatBytes(avgBytesProcessed)}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Avg per run • P90: {formatBytes(template.bytesProcessedP90 || 0)}
+                          Avg per run • P90: {formatBytes(bytesProcessedP90)}
                         </p>
                       </div>
 
@@ -181,10 +205,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                           <span className="text-xs text-gray-500 dark:text-gray-400">Runtime</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {formatRuntime(template.avgRuntime || 0)}
+                          {formatRuntime(avgRuntime)}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Avg • P50: {formatRuntime(template.runtimeP50 || 0)}
+                          Avg • P50: {formatRuntime(runtimeP50)}
                         </p>
                       </div>
                     </div>
@@ -196,10 +220,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                           <span className="text-xs text-blue-600 dark:text-blue-400">Frequency</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {template.runs}
+                          {templateRuns}
                         </p>
                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                          Total runs • {(template.runsPerDay || 0).toFixed(1)}/day
+                          Total runs • {runsPerDay.toFixed(1)}/day
                         </p>
                       </div>
 
@@ -209,10 +233,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                           <span className="text-xs text-green-600 dark:text-green-400">Cost per Run</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          ${(template.avgCostPerRun || 0).toFixed(3)}
+                          ${avgCostPerRun.toFixed(3)}
                         </p>
                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                          Total: ${(template.totalCost || 0).toFixed(2)}
+                          Total: ${totalCost.toFixed(2)}
                         </p>
                       </div>
 
@@ -222,7 +246,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                           <span className="text-xs text-orange-600 dark:text-orange-400">Monthly Cost</span>
                         </div>
                         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          ${(template.estimatedMonthlyCost || 0).toFixed(2)}
+                          ${estimatedMonthlyCost.toFixed(2)}
                         </p>
                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                           Estimated
@@ -237,7 +261,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                       Referenced Tables
                     </h3>
                     <div className="flex flex-wrap gap-2">
-                      {template.tables.map((table, idx) => (
+                      {tables.map((table, idx) => (
                         <span
                           key={idx}
                           className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
@@ -379,10 +403,10 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                       Individual query executions for this template over the analysis window.
                     </p>
                   </div>
-                  {runs.length === 0 && template.runs > 0 ? (
+                  {runs.length === 0 && templateRuns > 0 ? (
                     <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
                       <p className="text-gray-600 dark:text-gray-400">
-                        This template has been executed <span className="font-semibold">{template.runs}</span> times
+                        This template has been executed <span className="font-semibold">{templateRuns}</span> times
                       </p>
                       <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
                         Detailed run history will be available after full analysis
@@ -600,7 +624,7 @@ const TemplateDetails = ({ template, isOpen, onClose, onAnalyze, analysisStatus,
                                                Number(analysisResult.validationResult.originalCost) || 0;
                                 const optimized = analysisResult.metadata?.stages?.optimization?.final_validation?.estimated_cost_usd ||
                                                 Number(analysisResult.validationResult.optimizedCost) || 0;
-                                const monthlySavings = (original - optimized) * template.runs * 30 / (template.analysisWindow || 30);
+                                const monthlySavings = (original - optimized) * templateRuns * 30 / (template.analysisWindow || 30);
                                 return monthlySavings < 0.01 ? monthlySavings.toFixed(6) : monthlySavings.toFixed(2);
                               })()}
                             </p>

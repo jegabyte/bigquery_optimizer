@@ -423,12 +423,14 @@ export const analysisRulesets = [
 ];
 
 export const formatBytes = (bytes) => {
+  if (!bytes || bytes === 0) return '0 MB';
   if (bytes < 1e9) return `${(bytes / 1e6).toFixed(0)} MB`;
   if (bytes < 1e12) return `${(bytes / 1e9).toFixed(1)} GB`;
   return `${(bytes / 1e12).toFixed(2)} TB`;
 };
 
 export const formatCost = (amount) => {
+  if (amount === null || amount === undefined) amount = 0;
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -438,6 +440,7 @@ export const formatCost = (amount) => {
 };
 
 export const formatRuntime = (seconds) => {
+  if (!seconds || seconds === 0) return '0s';
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
   return `${(seconds / 3600).toFixed(1)}h`;
