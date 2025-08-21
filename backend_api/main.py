@@ -3,8 +3,10 @@ BigQuery API Service for Projects & Jobs
 Separate FastAPI backend for handling BigQuery operations
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import traceback
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from typing import List, Optional, Dict, Any, Union
@@ -15,7 +17,8 @@ import json
 import os
 import logging
 from pydantic import BaseModel
-from config import config
+from config import Config
+from logging_config import setup_logging, log_error_with_context, create_module_logger
 from information_schema_scanner import (
     check_information_schema_access,
     validate_project_access,
@@ -24,9 +27,14 @@ from information_schema_scanner import (
 )
 from table_analysis import analyze_tables, store_table_analysis
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup comprehensive logging
+setup_logging(
+    log_level=os.getenv('LOG_LEVEL', 'INFO'),
+    log_format='simple' if os.getenv('APP_ENV') == 'development' else 'detailed'
+)
+
+# Initialize module logger
+logger = create_module_logger('main')
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -38,11 +46,76 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=Config.CORS_ORIGINS.split(','),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler for better error visibility
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with detailed logging"""
+    
+    # Log full error details
+    error_id = hashlib.md5(f"{datetime.utcnow().isoformat()}{str(exc)}".encode()).hexdigest()[:8]
+    
+    log_error_with_context(
+        logger,
+        exc,
+        context={
+            'error_id': error_id,
+            'path': request.url.path,
+            'method': request.method,
+            'query_params': dict(request.query_params),
+            'headers': {k: v for k, v in request.headers.items() if 'authorization' not in k.lower()},
+        }
+    )
+    
+    # Prepare error response based on environment
+    if Config.APP_ENV == 'development':
+        # In development, return full error details
+        error_detail = {
+            'error_id': error_id,
+            'error': str(exc),
+            'type': type(exc).__name__,
+            'traceback': traceback.format_exc().split('\n'),
+            'path': request.url.path,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    else:
+        # In production, return limited error info
+        error_detail = {
+            'error_id': error_id,
+            'error': 'An internal server error occurred',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    
+    return JSONResponse(
+        status_code=500,
+        content=error_detail
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with logging"""
+    
+    # Log HTTP exceptions at appropriate level
+    if exc.status_code >= 500:
+        logger.error(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    elif exc.status_code >= 400:
+        logger.warning(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    else:
+        logger.info(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            'detail': exc.detail,
+            'status_code': exc.status_code,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    )
 
 # Initialize BigQuery client
 # You can use service account or default credentials
@@ -59,11 +132,12 @@ try:
         client = bigquery.Client()
     
     # Use centralized configuration
-    BQ_PROJECT = config.BQ_PROJECT_ID
-    BQ_DATASET = config.BQ_DATASET
+    BQ_PROJECT = Config.BQ_PROJECT_ID
+    BQ_DATASET = Config.BQ_DATASET
+    logger.info(f"BigQuery client initialized for project: {BQ_PROJECT}")
     
 except Exception as e:
-    print(f"Warning: Could not initialize BigQuery client: {e}")
+    logger.error(f"Failed to initialize BigQuery client: {e}", exc_info=True)
     client = None
 
 # Pydantic models
@@ -1651,27 +1725,54 @@ async def get_table_analysis(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Rules Management Endpoints (using Firestore)
+# Rules Management Endpoints (using BigQuery)
 @app.get("/api/rules")
 async def get_all_rules():
-    """Get all BigQuery anti-pattern rules from Firestore"""
+    """Get all BigQuery anti-pattern rules from BigQuery table"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        rules_ref = db.collection('bq_anti_pattern_rules')
-        docs = rules_ref.stream()
+        # Query rules from BigQuery table
+        query = f"""
+        SELECT 
+            rule_id,
+            title,
+            description,
+            severity,
+            category,
+            enabled,
+            detect_pattern,
+            fix_suggestion,
+            impact,
+            tags,
+            created_at,
+            updated_at
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        WHERE enabled = true
+        ORDER BY severity DESC, rule_id
+        """
+        
+        query_job = client.query(query)
+        results = list(query_job)
         
         rules = []
-        for doc in docs:
-            # Skip metadata document
-            if doc.id == '_metadata':
-                continue
-            rule_data = doc.to_dict()
-            rule_data['docId'] = doc.id
-            rules.append(rule_data)
-        
-        # Sort rules by order if available, otherwise by title
-        rules.sort(key=lambda x: (x.get('order', 999), x.get('title', '')))
+        for row in results:
+            rules.append({
+                'docId': row.rule_id,
+                'id': row.rule_id,
+                'title': row.title,
+                'description': row.description,
+                'severity': row.severity,
+                'category': row.category,
+                'enabled': row.enabled,
+                'detect': row.detect_pattern,
+                'fix': row.fix_suggestion,
+                'impact': row.impact,
+                'tags': row.tags.split(',') if row.tags else [],
+                'createdAt': row.created_at.isoformat() if row.created_at else None,
+                'updatedAt': row.updated_at.isoformat() if row.updated_at else None
+            })
         return rules
     except Exception as e:
         logger.error(f"Error fetching rules: {str(e)}")
@@ -1679,74 +1780,115 @@ async def get_all_rules():
 
 @app.get("/api/rules/{rule_id}")
 async def get_rule(rule_id: str):
-    """Get a specific rule by ID"""
+    """Get a specific rule by ID from BigQuery"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
-        doc = doc_ref.get()
+        query = f"""
+        SELECT 
+            rule_id,
+            title,
+            description,
+            severity,
+            category,
+            enabled,
+            detect_pattern,
+            fix_suggestion,
+            impact,
+            tags,
+            created_at,
+            updated_at
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        WHERE rule_id = '{rule_id}'
+        LIMIT 1
+        """
         
-        if doc.exists:
-            rule_data = doc.to_dict()
-            rule_data['docId'] = doc.id
-            return rule_data
-        else:
+        query_job = client.query(query)
+        results = list(query_job)
+        
+        if not results:
             raise HTTPException(status_code=404, detail="Rule not found")
+        
+        row = results[0]
+        return {
+            'docId': row.rule_id,
+            'id': row.rule_id,
+            'title': row.title,
+            'description': row.description,
+            'severity': row.severity,
+            'category': row.category,
+            'enabled': row.enabled,
+            'detect': row.detect_pattern,
+            'fix': row.fix_suggestion,
+            'impact': row.impact,
+            'tags': row.tags.split(',') if row.tags else [],
+            'createdAt': row.created_at.isoformat() if row.created_at else None,
+            'updatedAt': row.updated_at.isoformat() if row.updated_at else None
+        }
     except Exception as e:
         logger.error(f"Error fetching rule {rule_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/rules/{rule_id}")
 async def update_rule(rule_id: str, rule: Dict[str, Any] = Body(...)):
-    """Update an existing rule"""
+    """Update an existing rule in BigQuery"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        # Build UPDATE statement
+        update_fields = []
+        if 'title' in rule:
+            update_fields.append(f"title = '{rule['title']}'")
+        if 'severity' in rule:
+            update_fields.append(f"severity = '{rule['severity']}'")
+        if 'enabled' in rule:
+            update_fields.append(f"enabled = {rule['enabled']}")
+        if 'detect' in rule:
+            update_fields.append(f"detect_pattern = '{rule['detect']}'")
+        if 'fix' in rule:
+            update_fields.append(f"fix_suggestion = '{rule['fix']}'")
+        if 'category' in rule:
+            update_fields.append(f"category = '{rule['category']}'")
+        if 'impact' in rule:
+            update_fields.append(f"impact = '{rule['impact']}'")
+        if 'tags' in rule:
+            tags_str = ','.join(rule['tags']) if isinstance(rule['tags'], list) else rule['tags']
+            update_fields.append(f"tags = '{tags_str}'")
         
-        if not doc_ref.get().exists:
-            raise HTTPException(status_code=404, detail="Rule not found")
+        update_fields.append(f"updated_at = CURRENT_TIMESTAMP()")
         
-        update_data = {
-            'title': rule.get('title'),
-            'severity': rule.get('severity'),
-            'enabled': rule.get('enabled'),
-            'detect': rule.get('detect'),
-            'fix': rule.get('fix'),
-            'examples': rule.get('examples'),
-            'category': rule.get('category'),
-            'updated_at': datetime.utcnow().isoformat()
-        }
+        update_query = f"""
+        UPDATE `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        SET {', '.join(update_fields)}
+        WHERE rule_id = '{rule_id}'
+        """
         
-        # Remove None values
-        update_data = {k: v for k, v in update_data.items() if v is not None}
+        query_job = client.query(update_query)
+        query_job.result()  # Wait for completion
         
-        doc_ref.update(update_data)
-        
-        updated_doc = doc_ref.get()
-        rule_data = updated_doc.to_dict()
-        rule_data['docId'] = updated_doc.id
-        return rule_data
+        # Return updated rule
+        return await get_rule(rule_id)
     except Exception as e:
         logger.error(f"Error updating rule {rule_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/rules/{rule_id}/toggle")
 async def toggle_rule(rule_id: str, enabled: bool = Body(...)):
-    """Toggle a rule's enabled status"""
+    """Toggle a rule's enabled status in BigQuery"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
-        doc = doc_ref.get()
+        update_query = f"""
+        UPDATE `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        SET enabled = {enabled}, updated_at = CURRENT_TIMESTAMP()
+        WHERE rule_id = '{rule_id}'
+        """
         
-        if not doc.exists:
-            raise HTTPException(status_code=404, detail="Rule not found")
-        
-        doc_ref.update({
-            'enabled': enabled,
-            'updated_at': datetime.utcnow().isoformat()
-        })
+        query_job = client.query(update_query)
+        query_job.result()  # Wait for completion
         
         return {"success": True, "message": f"Rule {rule_id} {'enabled' if enabled else 'disabled'}"}
     except Exception as e:
@@ -1755,61 +1897,139 @@ async def toggle_rule(rule_id: str, enabled: bool = Body(...)):
 
 @app.post("/api/rules")
 async def create_rule(rule: Dict[str, Any] = Body(...)):
-    """Create a new rule"""
+    """Create a new rule in BigQuery"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
         rule_id = rule.get('id')
         if not rule_id:
             raise HTTPException(status_code=400, detail="Rule ID is required")
         
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        # Check if rule exists
+        check_query = f"""
+        SELECT COUNT(*) as count
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        WHERE rule_id = '{rule_id}'
+        """
         
-        if doc_ref.get().exists:
+        query_job = client.query(check_query)
+        results = list(query_job)
+        if results[0].count > 0:
             raise HTTPException(status_code=409, detail="Rule already exists")
         
-        rule_data = {
-            'id': rule_id,
-            'title': rule.get('title'),
-            'severity': rule.get('severity', 'warning'),
-            'category': rule.get('category', 'General'),
-            'enabled': rule.get('enabled', True),
-            'detect': rule.get('detect'),
-            'fix': rule.get('fix'),
-            'examples': rule.get('examples', {'bad': [], 'good': []}),
-            'order': rule.get('order', 999),
-            'created_at': datetime.utcnow().isoformat(),
-            'updated_at': datetime.utcnow().isoformat()
-        }
+        # Insert new rule
+        tags_str = ','.join(rule.get('tags', [])) if isinstance(rule.get('tags'), list) else rule.get('tags', '')
         
-        doc_ref.set(rule_data)
+        insert_query = f"""
+        INSERT INTO `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        (rule_id, title, description, severity, category, enabled, detect_pattern, fix_suggestion, impact, tags, created_at, updated_at)
+        VALUES (
+            '{rule_id}',
+            '{rule.get('title', '')}',
+            '{rule.get('description', rule.get('detect', ''))}',
+            '{rule.get('severity', 'medium')}',
+            '{rule.get('category', 'General')}',
+            {rule.get('enabled', True)},
+            '{rule.get('detect', '')}',
+            '{rule.get('fix', '')}',
+            '{rule.get('impact', '')}',
+            '{tags_str}',
+            CURRENT_TIMESTAMP(),
+            CURRENT_TIMESTAMP()
+        )
+        """
         
-        created_doc = doc_ref.get()
-        response_data = created_doc.to_dict()
-        response_data['docId'] = created_doc.id
-        return response_data
+        query_job = client.query(insert_query)
+        query_job.result()  # Wait for completion
+        
+        # Return created rule
+        return await get_rule(rule_id)
     except Exception as e:
         logger.error(f"Error creating rule: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/rules/{rule_id}")
 async def delete_rule(rule_id: str):
-    """Delete a rule"""
+    """Delete a rule from BigQuery"""
+    if not client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=config.FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
+        delete_query = f"""
+        DELETE FROM `{BQ_PROJECT}.{BQ_DATASET}.bq_anti_pattern_rules`
+        WHERE rule_id = '{rule_id}'
+        """
         
-        if not doc_ref.get().exists:
+        query_job = client.query(delete_query)
+        query_job.result()  # Wait for completion
+        
+        if query_job.num_dml_affected_rows == 0:
             raise HTTPException(status_code=404, detail="Rule not found")
-        
-        doc_ref.delete()
         
         return {"success": True, "message": f"Rule {rule_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting rule {rule_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information"""
+    logger.info("="*60)
+    logger.info("BigQuery Optimizer Backend API Starting")
+    logger.info(f"Environment: {Config.APP_ENV}")
+    logger.info(f"GCP Project: {Config.GCP_PROJECT_ID}")
+    logger.info(f"BQ Project: {Config.BQ_PROJECT_ID}")
+    logger.info(f"BQ Dataset: {Config.BQ_DATASET}")
+    logger.info(f"CORS Origins: {Config.CORS_ORIGINS}")
+    logger.info(f"BigQuery Client: {'Initialized' if client else 'Not Available'}")
+    logger.info("="*60)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint with detailed status"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": Config.APP_ENV,
+        "services": {
+            "bigquery": "connected" if client else "disconnected"
+        },
+        "configuration": {
+            "gcp_project": Config.GCP_PROJECT_ID,
+            "bq_project": Config.BQ_PROJECT_ID,
+            "bq_dataset": Config.BQ_DATASET
+        }
+    }
+    return health_status
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    
+    port = Config.BACKEND_API_PORT
+    logger.info(f"Starting server on port {port}")
+    
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port,
+        log_config={
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                },
+            },
+            "root": {
+                "level": Config.LOG_LEVEL,
+                "handlers": ["default"],
+            },
+        }
+    )

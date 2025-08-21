@@ -9,7 +9,7 @@ const config = {
   backendApiUrl: import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001',
   
   // Google Cloud Configuration (passed from backend)
-  gcpProjectId: import.meta.env.VITE_GCP_PROJECT_ID || 'aiva-e74f3',
+  gcpProjectId: import.meta.env.VITE_GCP_PROJECT_ID || '',
   bqDataset: import.meta.env.VITE_BQ_DATASET || 'bq_optimizer',
   
   // Application Configuration

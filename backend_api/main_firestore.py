@@ -3,8 +3,9 @@ BigQuery API Service with Firestore Storage
 FastAPI backend using Firestore for data persistence
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from typing import List, Optional, Dict, Any
@@ -15,16 +16,24 @@ import json
 import os
 import time
 import logging
+import traceback
 from pydantic import BaseModel
 from firestore_service import firestore_service
 from firestore_templates import TemplateFirestoreManager
+from logging_config import setup_logging, log_error_with_context, create_module_logger
+from config import Config
+
+# Setup comprehensive logging
+setup_logging(
+    log_level=os.getenv('LOG_LEVEL', 'INFO'),
+    log_format='simple' if os.getenv('APP_ENV') == 'development' else 'detailed'
+)
+
+# Initialize module logger
+logger = create_module_logger('main')
 
 # Initialize template manager
 template_manager = TemplateFirestoreManager()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -36,11 +45,76 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=Config.CORS_ORIGINS.split(','),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler for better error visibility
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with detailed logging"""
+    
+    # Log full error details
+    error_id = hashlib.md5(f"{datetime.utcnow().isoformat()}{str(exc)}".encode()).hexdigest()[:8]
+    
+    log_error_with_context(
+        logger,
+        exc,
+        context={
+            'error_id': error_id,
+            'path': request.url.path,
+            'method': request.method,
+            'query_params': dict(request.query_params),
+            'headers': {k: v for k, v in request.headers.items() if 'authorization' not in k.lower()},
+        }
+    )
+    
+    # Prepare error response based on environment
+    if Config.APP_ENV == 'development':
+        # In development, return full error details
+        error_detail = {
+            'error_id': error_id,
+            'error': str(exc),
+            'type': type(exc).__name__,
+            'traceback': traceback.format_exc().split('\n'),
+            'path': request.url.path,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    else:
+        # In production, return limited error info
+        error_detail = {
+            'error_id': error_id,
+            'error': 'An internal server error occurred',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    
+    return JSONResponse(
+        status_code=500,
+        content=error_detail
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with logging"""
+    
+    # Log HTTP exceptions at appropriate level
+    if exc.status_code >= 500:
+        logger.error(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    elif exc.status_code >= 400:
+        logger.warning(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    else:
+        logger.info(f"HTTP {exc.status_code} at {request.url.path}: {exc.detail}")
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            'detail': exc.detail,
+            'status_code': exc.status_code,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    )
 
 # Initialize BigQuery client for query analysis only
 try:
@@ -53,10 +127,11 @@ try:
     else:
         bq_client = bigquery.Client()
     
-    BQ_PROJECT = os.getenv('BQ_PROJECT_ID', 'aiva-e74f3')
+    BQ_PROJECT = Config.BQ_PROJECT_ID
+    logger.info(f"BigQuery client initialized for project: {BQ_PROJECT}")
     
 except Exception as e:
-    print(f"Warning: Could not initialize BigQuery client: {e}")
+    logger.error(f"Failed to initialize BigQuery client: {e}", exc_info=True)
     bq_client = None
 
 # Pydantic models
@@ -159,6 +234,7 @@ async def get_dashboard_stats():
         stats = firestore_service.get_dashboard_stats()
         return stats
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/projects/scan")
@@ -438,6 +514,7 @@ async def get_projects():
         return formatted_projects
         
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/projects/{project_id}/templates")
@@ -481,6 +558,7 @@ async def get_project_templates(project_id: str):
         return formatted_templates
         
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/projects/{project_id}/refresh")
@@ -533,6 +611,7 @@ async def refresh_project(project_id: str):
         }
         
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/projects/{project_id}")
@@ -546,6 +625,7 @@ async def delete_project(project_id: str):
             raise HTTPException(status_code=404, detail="Project not found")
             
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyses")
@@ -573,6 +653,7 @@ async def save_analysis(analysis: AnalysisResult):
         }
         
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analyses/{analysis_id}")
@@ -586,6 +667,7 @@ async def get_analysis(analysis_id: str):
             raise HTTPException(status_code=404, detail="Analysis not found")
             
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analyses")
@@ -604,6 +686,7 @@ async def get_analyses(
         return analyses
         
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Template Management Endpoints
@@ -626,6 +709,7 @@ async def save_template_analysis(data: dict = Body(...)):
             "message": "Analysis saved successfully"
         }
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/templates/{project_id}")
@@ -673,6 +757,7 @@ async def get_template_analysis(project_id: str, template_id: str):
         else:
             raise HTTPException(status_code=404, detail="Analysis not found")
     except Exception as e:
+        logger.error(f"Error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Rules Management Endpoints
@@ -683,7 +768,7 @@ async def get_all_rules():
         rules = []
         # Use the db directly from firestore module
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         rules_ref = db.collection('bq_anti_pattern_rules')
         docs = rules_ref.stream()
         
@@ -707,7 +792,7 @@ async def get_rule(rule_id: str):
     """Get a specific rule by ID"""
     try:
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
         doc = doc_ref.get()
         
@@ -726,7 +811,7 @@ async def toggle_rule(rule_id: str, enabled: bool = Body(...)):
     """Toggle a rule's enabled status"""
     try:
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
         doc = doc_ref.get()
         
@@ -752,7 +837,7 @@ async def create_rule(rule: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="Rule ID is required")
         
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
         
         # Check if rule already exists
@@ -784,7 +869,7 @@ async def update_rule(rule_id: str, rule: Dict[str, Any] = Body(...)):
     """Update an existing rule"""
     try:
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
         
         if not doc_ref.get().exists:
@@ -819,7 +904,7 @@ async def delete_rule(rule_id: str):
     """Delete a rule"""
     try:
         from google.cloud import firestore as fs
-        db = fs.Client(project='aiva-e74f3')
+        db = fs.Client(project=Config.GCP_PROJECT_ID)
         doc_ref = db.collection('bq_anti_pattern_rules').document(rule_id)
         
         if not doc_ref.get().exists:
@@ -832,6 +917,65 @@ async def delete_rule(rule_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information"""
+    logger.info("="*60)
+    logger.info("BigQuery Optimizer Backend API Starting")
+    logger.info(f"Environment: {Config.APP_ENV}")
+    logger.info(f"GCP Project: {Config.GCP_PROJECT_ID}")
+    logger.info(f"BQ Project: {Config.BQ_PROJECT_ID}")
+    logger.info(f"BQ Dataset: {Config.BQ_DATASET}")
+    logger.info(f"CORS Origins: {Config.CORS_ORIGINS}")
+    logger.info(f"BigQuery Client: {'Initialized' if bq_client else 'Not Available'}")
+    logger.info("="*60)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint with detailed status"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": Config.APP_ENV,
+        "services": {
+            "bigquery": "connected" if bq_client else "disconnected",
+            "firestore": "connected"  # Firestore is always available
+        },
+        "configuration": {
+            "gcp_project": Config.GCP_PROJECT_ID,
+            "bq_project": Config.BQ_PROJECT_ID,
+            "bq_dataset": Config.BQ_DATASET
+        }
+    }
+    return health_status
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    
+    port = Config.BACKEND_API_PORT
+    logger.info(f"Starting server on port {port}")
+    
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port,
+        log_config={
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                },
+            },
+            "root": {
+                "level": Config.LOG_LEVEL,
+                "handlers": ["default"],
+            },
+        }
+    )

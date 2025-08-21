@@ -8,7 +8,10 @@ import json
 from typing import Dict, List, Optional, Any
 
 class TemplateFirestoreManager:
-    def __init__(self, project_id: str = "aiva-e74f3"):
+    def __init__(self, project_id: str = None):
+        if not project_id:
+            import os
+            project_id = os.getenv('GCP_PROJECT_ID', os.getenv('GOOGLE_CLOUD_PROJECT'))
         self.db = firestore.Client(project=project_id)
         self.templates_collection = "templates"  # Use existing collection
         self.analysis_collection = "template_analysis_results"

@@ -20,7 +20,7 @@ def fetch_rules_from_bigquery(project_id: Optional[str] = None) -> str:
     try:
         # Get project ID from environment or use provided
         if not project_id:
-            project_id = os.getenv('BQ_PROJECT_ID', os.getenv('GCP_PROJECT_ID', 'aiva-e74f3'))
+            project_id = os.getenv('BQ_PROJECT_ID', os.getenv('GCP_PROJECT_ID'))
         
         dataset_id = os.getenv('BQ_DATASET', 'bq_optimizer')
         table_id = f"{project_id}.{dataset_id}.bq_anti_pattern_rules"

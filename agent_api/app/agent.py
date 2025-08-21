@@ -36,7 +36,7 @@ except ImportError as e:
     fetch_rules_from_firestore = None
 
 # --- Configuration ---
-PROJECT_ID = os.getenv("BQ_PROJECT_ID", os.getenv("GCP_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "aiva-e74f3")))
+PROJECT_ID = os.getenv("BQ_PROJECT_ID", os.getenv("GCP_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT")))
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 DATASET = os.getenv("BQ_DATASET", os.getenv("BIGQUERY_DATASET", "bq_optimizer"))
 

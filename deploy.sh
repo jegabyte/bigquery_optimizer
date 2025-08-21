@@ -18,13 +18,21 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 # ================================================================
+# Load environment variables from .env file if it exists
+# ================================================================
+if [ -f ".env" ]; then
+    echo "Loading environment from .env file..."
+    source .env
+fi
+
+# ================================================================
 # CENTRALIZED CONFIGURATION - ALL ENVIRONMENT VARIABLES
 # ================================================================
-# Change these values for your deployment
+# These can be overridden by .env file or environment variables
 # ================================================================
 
 # Primary Google Cloud Configuration
-export GCP_PROJECT_ID="${GCP_PROJECT_ID:-aiva-e74f3}"  # Your GCP project ID
+export GCP_PROJECT_ID="${GCP_PROJECT_ID}"  # Your GCP project ID - MUST BE SET
 export REGION="${REGION:-us-central1}"                  # Deployment region
 
 # BigQuery Configuration
@@ -48,6 +56,16 @@ export FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 # CORS Configuration
 export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}"
+
+# Validate required environment variables
+if [ -z "$GCP_PROJECT_ID" ]; then
+    echo "ERROR: GCP_PROJECT_ID is not set!"
+    echo "Please set it using one of these methods:"
+    echo "  1. Export: export GCP_PROJECT_ID=your-project-id"
+    echo "  2. Inline: GCP_PROJECT_ID=your-project-id ./deploy.sh"
+    echo "  3. Create .env file with: GCP_PROJECT_ID=your-project-id"
+    exit 1
+fi
 
 # Set consistent PROJECT_ID for backward compatibility
 PROJECT_ID="$GCP_PROJECT_ID"

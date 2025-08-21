@@ -29,7 +29,7 @@ AI-powered BigQuery query optimization tool using Google's ADK (Agent Developmen
                   │ BigQuery API
 ┌─────────────────▼───────────────────────┐
 │            Google BigQuery              │
-│         Project: aiva-e74f3             │
+│       Project: your-project-id          │
 └──────────────────────────────────────────┘
 ```
 
@@ -57,7 +57,7 @@ cd bigquery-optimizer
 ```bash
 # Set up Application Default Credentials
 gcloud auth application-default login
-gcloud config set project aiva-e74f3
+gcloud config set project your-project-id
 
 # Enable required APIs (if not already enabled)
 gcloud services enable aiplatform.googleapis.com
@@ -495,7 +495,7 @@ bigquery-optimizer/
 ### Backend (.env)
 
 ```env
-GOOGLE_CLOUD_PROJECT=aiva-e74f3
+GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_GENAI_USE_VERTEXAI=True
 BIGQUERY_DATASET=analytics
 BIGQUERY_LOCATION=US
@@ -619,7 +619,7 @@ gcloud projects get-iam-policy $(gcloud config get-value project)
 bq ls
 
 # Check permissions
-gcloud projects get-iam-policy aiva-e74f3
+gcloud projects get-iam-policy your-project-id
 ```
 
 ## Production Deployment

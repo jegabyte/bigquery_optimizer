@@ -10,7 +10,7 @@ class Config:
     """Centralized configuration class"""
     
     # Google Cloud Project Configuration
-    GCP_PROJECT_ID: str = os.getenv('GCP_PROJECT_ID', 'aiva-e74f3')
+    GCP_PROJECT_ID: str = os.getenv('GCP_PROJECT_ID', '')
     BQ_PROJECT_ID: str = os.getenv('BQ_PROJECT_ID', GCP_PROJECT_ID)  # Falls back to GCP_PROJECT_ID
     
     # BigQuery Configuration
@@ -28,9 +28,13 @@ class Config:
     # API Configuration
     API_HOST: str = os.getenv('API_HOST', '0.0.0.0')
     API_PORT: int = int(os.getenv('API_PORT', '8001'))
+    BACKEND_API_PORT: int = int(os.getenv('BACKEND_API_PORT', '8001'))
+    
+    # Logging Configuration
+    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
     
     # CORS Configuration
-    CORS_ORIGINS: list = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173').split(',')
+    CORS_ORIGINS: str = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173')
     
     # Google Cloud Credentials (optional - uses Application Default Credentials if not set)
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')

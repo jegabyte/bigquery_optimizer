@@ -10,7 +10,7 @@ class Config:
     """Centralized configuration for Agent API"""
     
     # Google Cloud Project Configuration
-    GCP_PROJECT_ID: str = os.getenv('GCP_PROJECT_ID', 'aiva-e74f3')
+    GCP_PROJECT_ID: str = os.getenv('GCP_PROJECT_ID', '')
     BQ_PROJECT_ID: str = os.getenv('BQ_PROJECT_ID', GCP_PROJECT_ID)
     
     # BigQuery Configuration
