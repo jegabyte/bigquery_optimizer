@@ -834,7 +834,7 @@ const AnalysisResult = () => {
                 onClick={() => getStageData('metadata') && setSelectedStage(selectedStage === 'metadata' ? null : 'metadata')}
                 disabled={!getStageData('metadata')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  stageData.metadata 
+                  getStageData('metadata') 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
                     : currentStep === 0 
                       ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'

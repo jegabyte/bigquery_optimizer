@@ -24,6 +24,18 @@ import toast from 'react-hot-toast';
 const TableDetailsModal = ({ table, isOpen, onClose }) => {
   if (!isOpen || !table) return null;
 
+  // Calculate optimization suggestions
+  const suggestions = [];
+  if (!table.is_partitioned && table.total_logical_gb > 1) {
+    suggestions.push({ type: 'warning', text: 'Consider partitioning this large table' });
+  }
+  if (!table.is_clustered && table.total_queries_6m > 100) {
+    suggestions.push({ type: 'info', text: 'Consider clustering for better query performance' });
+  }
+  if (table.total_queries_6m === 0) {
+    suggestions.push({ type: 'warning', text: 'Unused table - consider archiving or deletion' });
+  }
+
   return (
     <AnimatePresence>
       <motion.div
@@ -37,180 +49,280 @@ const TableDetailsModal = ({ table, isOpen, onClose }) => {
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
-          className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-auto"
+          className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
-          <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Table Details: {table.table_name}
-              </h2>
+          {/* Header */}
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-800 dark:to-blue-900 p-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <FiDatabase className="h-6 w-6" />
+                  {table.table_name}
+                </h2>
+                <p className="text-blue-100 text-sm mt-1">{table.full_table_name}</p>
+              </div>
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                className="p-2 hover:bg-white/20 rounded-lg transition-colors"
               >
-                <FiX className="h-5 w-5" />
+                <FiX className="h-5 w-5 text-white" />
               </button>
             </div>
           </div>
 
-          <div className="p-6 space-y-6">
-            {/* Basic Information */}
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Basic Information</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Full Name</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.full_table_name}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Dataset</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.dataset_id}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Table Type</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.table_type || 'TABLE'}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Created</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {table.table_creation_time ? new Date(table.table_creation_time).toLocaleDateString() : 'Unknown'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Age</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.table_age_days} days</dd>
-                </div>
-                {table.table_description && (
-                  <div className="col-span-2">
-                    <dt className="text-sm text-gray-500 dark:text-gray-400">Description</dt>
-                    <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.table_description}</dd>
+          <div className="overflow-y-auto max-h-[calc(90vh-100px)]">
+            {/* Key Metrics Cards */}
+            <div className="grid grid-cols-4 gap-4 p-6 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Total Storage</p>
+                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                      {formatBytes(table.total_logical_gb)}
+                    </p>
                   </div>
-                )}
-              </dl>
+                  <FiHardDrive className="h-8 w-8 text-blue-500 opacity-50" />
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Monthly Cost</p>
+                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                      {formatCost(table.active_storage_cost_monthly_usd + table.long_term_storage_cost_monthly_usd)}
+                    </p>
+                  </div>
+                  <FiDollarSign className="h-8 w-8 text-green-500 opacity-50" />
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Total Queries</p>
+                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                      {table.total_queries_6m.toLocaleString()}
+                    </p>
+                  </div>
+                  <FiActivity className="h-8 w-8 text-purple-500 opacity-50" />
+                </div>
+              </div>
+              
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Table Age</p>
+                    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                      {table.table_age_days}d
+                    </p>
+                  </div>
+                  <FiClock className="h-8 w-8 text-orange-500 opacity-50" />
+                </div>
+              </div>
             </div>
 
-            {/* Partitioning & Clustering */}
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Partitioning & Clustering</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Partitioned</dt>
-                  <dd className="text-sm font-medium">
-                    {table.is_partitioned ? (
-                      <span className="text-green-600 dark:text-green-400">Yes</span>
-                    ) : (
-                      <span className="text-gray-500 dark:text-gray-400">No</span>
-                    )}
-                  </dd>
-                </div>
-                {table.is_partitioned && (
-                  <>
-                    <div>
-                      <dt className="text-sm text-gray-500 dark:text-gray-400">Partition Field</dt>
-                      <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.partition_field}</dd>
+            {/* Optimization Suggestions */}
+            {suggestions.length > 0 && (
+              <div className="mx-6 mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-2 flex items-center gap-2">
+                  <FiAlertTriangle className="h-4 w-4" />
+                  Optimization Opportunities
+                </h3>
+                <ul className="space-y-1">
+                  {suggestions.map((suggestion, idx) => (
+                    <li key={idx} className="text-sm text-yellow-700 dark:text-yellow-300 flex items-start gap-2">
+                      <span className="text-yellow-500 mt-0.5">•</span>
+                      {suggestion.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="p-6 space-y-6">
+              {/* Two Column Layout */}
+              <div className="grid grid-cols-2 gap-6">
+                {/* Basic Information */}
+                <div className="bg-white dark:bg-gray-800 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                    <FiInfo className="h-4 w-4 text-blue-500" />
+                    Basic Information
+                  </h3>
+                  <dl className="space-y-3">
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Dataset</dt>
+                      <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.dataset_id}</dd>
                     </div>
-                    <div>
-                      <dt className="text-sm text-gray-500 dark:text-gray-400">Require Partition Filter</dt>
-                      <dd className="text-sm font-medium">
-                        {table.require_partition_filter ? 'Yes' : 'No'}
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Table Type</dt>
+                      <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200">
+                          {table.table_type || 'BASE TABLE'}
+                        </span>
                       </dd>
                     </div>
-                    {table.partition_expiration_days && (
-                      <div>
-                        <dt className="text-sm text-gray-500 dark:text-gray-400">Partition Expiration</dt>
-                        <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {table.partition_expiration_days} days
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Created</dt>
+                      <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {table.table_creation_time ? new Date(table.table_creation_time).toLocaleDateString() : 'Unknown'}
+                      </dd>
+                    </div>
+                    {table.table_description && (
+                      <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                        <dt className="text-sm text-gray-500 dark:text-gray-400 mb-1">Description</dt>
+                        <dd className="text-sm text-gray-700 dark:text-gray-300">{table.table_description}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+
+                {/* Partitioning & Clustering */}
+                <div className="bg-white dark:bg-gray-800 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                    <FiLayers className="h-4 w-4 text-purple-500" />
+                    Partitioning & Clustering
+                  </h3>
+                  <dl className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Partitioned</dt>
+                      <dd className="text-sm font-medium">
+                        {table.is_partitioned ? (
+                          <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                            <FiCheckCircle className="h-4 w-4" />
+                            {table.partition_field}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">No</span>
+                        )}
+                      </dd>
+                    </div>
+                    {table.is_partitioned && (
+                      <div className="flex justify-between">
+                        <dt className="text-sm text-gray-500 dark:text-gray-400">Require Filter</dt>
+                        <dd className="text-sm font-medium">
+                          {table.require_partition_filter ? (
+                            <span className="text-green-600 dark:text-green-400">Yes</span>
+                          ) : (
+                            <span className="text-orange-600 dark:text-orange-400">No</span>
+                          )}
                         </dd>
                       </div>
                     )}
-                  </>
-                )}
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Clustered</dt>
-                  <dd className="text-sm font-medium">
-                    {table.is_clustered ? (
-                      <span className="text-green-600 dark:text-green-400">Yes</span>
-                    ) : (
-                      <span className="text-gray-500 dark:text-gray-400">No</span>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Clustered</dt>
+                      <dd className="text-sm font-medium">
+                        {table.is_clustered ? (
+                          <span className="text-green-600 dark:text-green-400">
+                            <FiCheckCircle className="h-4 w-4 inline mr-1" />
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">No</span>
+                        )}
+                      </dd>
+                    </div>
+                    {table.is_clustered && table.cluster_fields_raw && (
+                      <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                        <dt className="text-sm text-gray-500 dark:text-gray-400 mb-1">Cluster Fields</dt>
+                        <dd className="text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 p-2 rounded">
+                          {table.cluster_fields_raw}
+                        </dd>
+                      </div>
                     )}
-                  </dd>
+                  </dl>
                 </div>
-                {table.is_clustered && table.cluster_fields_raw && (
-                  <div className="col-span-2">
-                    <dt className="text-sm text-gray-500 dark:text-gray-400">Cluster Fields</dt>
-                    <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">{table.cluster_fields_raw}</dd>
+              </div>
+
+              {/* Storage Details */}
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                  <FiHardDrive className="h-4 w-4 text-blue-500" />
+                  Storage Details
+                </h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      {formatBytes(table.active_logical_gb)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Active Storage</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                      {formatCost(table.active_storage_cost_monthly_usd)}/mo
+                    </p>
                   </div>
-                )}
-              </dl>
-            </div>
+                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      {formatBytes(table.long_term_logical_gb)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Long-term Storage</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                      {formatCost(table.long_term_storage_cost_monthly_usd)}/mo
+                    </p>
+                  </div>
+                  <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {formatBytes(table.total_logical_gb)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Total Storage</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 font-medium">
+                      {formatCost(table.active_storage_cost_monthly_usd + table.long_term_storage_cost_monthly_usd)}/mo
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-            {/* Storage Metrics */}
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Storage Metrics</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Total Storage</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatBytes(table.total_logical_gb)}
-                  </dd>
+              {/* Usage Statistics */}
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                  <FiActivity className="h-4 w-4 text-purple-500" />
+                  Usage Statistics (Last 6 Months)
+                </h3>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Total Queries</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {table.total_queries_6m.toLocaleString()}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Unique Users</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {table.unique_users_6m}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Last Queried</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {formatDate(table.last_queried_time)}
+                      </dd>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Data Billed</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {formatBytes(table.total_tb_billed * 1024)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Query Cost</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {formatCost(table.total_query_cost_6m_usd)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-gray-500 dark:text-gray-400">Avg Cost/Query</dt>
+                      <dd className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {table.total_queries_6m > 0 
+                          ? formatCost(table.total_query_cost_6m_usd / table.total_queries_6m)
+                          : '$0.00'}
+                      </dd>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Active Storage</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatBytes(table.active_logical_gb)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Long-term Storage</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatBytes(table.long_term_logical_gb)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Monthly Storage Cost</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatCost(table.active_storage_cost_monthly_usd + table.long_term_storage_cost_monthly_usd)}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            {/* Usage Metrics */}
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Usage Metrics (Last 6 Months)</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Total Queries</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {table.total_queries_6m.toLocaleString()}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Unique Users</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {table.unique_users_6m}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Data Billed</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatBytes(table.total_tb_billed * 1024)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Query Cost</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatCost(table.total_query_cost_6m_usd)}
-                  </dd>
-                </div>
-                <div className="col-span-2">
-                  <dt className="text-sm text-gray-500 dark:text-gray-400">Last Queried</dt>
-                  <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {formatDate(table.last_queried_time)}
-                  </dd>
-                </div>
-              </dl>
+              </div>
             </div>
           </div>
         </motion.div>
@@ -276,12 +388,23 @@ const TableAnalysis = ({ project }) => {
     setIsLoading(true);
     try {
       const response = await projectsApiService.getTableAnalysis(project.projectId);
-      if (response && response.tables) {
-        setTableData(response);
+      if (response && (response.analyses || response.tables)) {
+        // Format the response to match what the component expects
+        const formattedResponse = {
+          success: true,
+          tables_analyzed: response.total_tables || response.tables_analyzed || 0,
+          analyses: response.analyses || response.tables || [],
+          tables: response.analyses || response.tables || [] // For compatibility
+        };
+        
+        setTableData(formattedResponse);
         
         // Extract unique datasets for filter
-        const uniqueDatasets = [...new Set(response.tables.map(t => t.dataset_id))];
-        setDatasets(uniqueDatasets.sort());
+        const tables = response.analyses || response.tables || [];
+        if (tables.length > 0) {
+          const uniqueDatasets = [...new Set(tables.map(t => t.dataset_id))];
+          setDatasets(uniqueDatasets.sort());
+        }
       }
     } catch (error) {
       console.error('Failed to fetch table analysis:', error);
@@ -298,20 +421,61 @@ const TableAnalysis = ({ project }) => {
     setIsAnalyzing(true);
     try {
       const response = await projectsApiService.analyzeProjectTables(project.projectId);
-      if (response.success) {
-        toast.success('Table analysis completed successfully');
-        setTableData(response);
+      console.log('Table analysis response:', response); // Debug log
+      
+      // Check if response indicates success or contains data
+      if (response.success === true && response.tables_analyzed > 0) {
+        toast.success(`Table analysis completed: ${response.tables_analyzed} tables analyzed`);
+        
+        // Ensure the response has the correct structure
+        const formattedResponse = {
+          success: true,
+          tables_analyzed: response.tables_analyzed,
+          analyses: response.analyses || [],
+          tables: response.analyses || [] // Add 'tables' field for compatibility
+        };
+        
+        setTableData(formattedResponse);
         
         // Extract unique datasets for filter
-        const uniqueDatasets = [...new Set(response.tables.map(t => t.dataset_id))];
+        const uniqueDatasets = [...new Set(response.analyses.map(t => t.dataset_id))];
         setDatasets(uniqueDatasets.sort());
         setCurrentPage(1); // Reset to first page
+      } else if (response.success === false) {
+        // Handle error response with detailed message
+        const errorMessage = response.message || response.error || 'Table analysis failed';
+        console.error('Table analysis error:', response);
+        
+        // Show user-friendly error message
+        toast.error(errorMessage, {
+          duration: 6000,
+          style: {
+            maxWidth: '500px',
+          }
+        });
+        
+        // If there are additional details, log them
+        if (response.details) {
+          console.error('Error details:', response.details);
+        }
+      } else if (response.tables_analyzed === 0) {
+        toast.info('No tables found to analyze in this project');
       } else {
-        toast.error('Table analysis failed: ' + (response.error || 'Unknown error'));
+        // Handle old format response for backward compatibility
+        if (response.tables && response.tables.length > 0) {
+          toast.success('Table analysis completed successfully');
+          setTableData(response);
+          
+          const uniqueDatasets = [...new Set(response.tables.map(t => t.dataset_id))];
+          setDatasets(uniqueDatasets.sort());
+          setCurrentPage(1);
+        } else {
+          toast.warning('No tables found in the project');
+        }
       }
     } catch (error) {
       console.error('Failed to run table analysis:', error);
-      toast.error('Failed to run table analysis');
+      toast.error('Failed to connect to the analysis service. Please check your connection and try again.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -430,7 +594,14 @@ const TableAnalysis = ({ project }) => {
     );
   }
 
-  if (!tableData || !tableData.tables || tableData.tables.length === 0) {
+  // Check for both 'tables' and 'analyses' fields for compatibility
+  const tables = tableData?.analyses || tableData?.tables || [];
+  
+  console.log('TableData:', tableData); // Debug log
+  console.log('Tables array:', tables); // Debug log
+  console.log('Tables length:', tables.length); // Debug log
+  
+  if (!tableData || !Array.isArray(tables) || tables.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
         <div className="text-center">
@@ -463,7 +634,18 @@ const TableAnalysis = ({ project }) => {
     );
   }
 
-  const filteredAndSortedTables = sortTables(filterTables(tableData.tables));
+  const filteredAndSortedTables = sortTables(filterTables(tables));
+  
+  // Calculate summary statistics from tables data
+  const summary = {
+    total_tables: tables.length,
+    unused_tables_count: tables.filter(t => (t.total_queries_6m || 0) === 0).length,
+    total_storage_gb: tables.reduce((sum, t) => sum + (t.total_logical_gb || 0), 0),
+    partitioned_tables: tables.filter(t => t.is_partitioned).length,
+    clustered_tables: tables.filter(t => t.is_clustered).length,
+    total_storage_cost_monthly: tables.reduce((sum, t) => sum + (t.active_storage_cost_monthly_usd || 0) + (t.long_term_storage_cost_monthly_usd || 0), 0),
+    total_query_cost_6m: tables.reduce((sum, t) => sum + (t.total_query_cost_6m_usd || 0), 0)
+  };
   
   // Pagination
   const totalPages = Math.ceil(filteredAndSortedTables.length / itemsPerPage);
@@ -484,10 +666,10 @@ const TableAnalysis = ({ project }) => {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Total Tables</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                {tableData.summary.total_tables}
+                {summary.total_tables}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {tableData.summary.unused_tables_count} unused
+                {summary.unused_tables_count} unused
               </p>
             </div>
             <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded">
@@ -506,10 +688,10 @@ const TableAnalysis = ({ project }) => {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Total Storage</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                {formatBytes(tableData.summary.total_storage_gb)}
+                {formatBytes(summary.total_storage_gb)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {tableData.summary.partitioned_tables} partitioned
+                {summary.partitioned_tables} partitioned
               </p>
             </div>
             <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded">
@@ -528,10 +710,10 @@ const TableAnalysis = ({ project }) => {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Storage Cost/Month</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                {formatCost(tableData.summary.total_storage_cost_monthly)}
+                {formatCost(summary.total_storage_cost_monthly)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {tableData.summary.clustered_tables} clustered
+                {summary.clustered_tables} clustered
               </p>
             </div>
             <div className="p-2 bg-red-50 dark:bg-red-950/30 rounded">
@@ -550,7 +732,7 @@ const TableAnalysis = ({ project }) => {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Query Cost (6M)</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                {formatCost(tableData.summary.total_query_cost_6m)}
+                {formatCost(summary.total_query_cost_6m)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Last {tableData.analysis_window || 180} days

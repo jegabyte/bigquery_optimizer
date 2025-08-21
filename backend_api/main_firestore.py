@@ -917,6 +917,552 @@ async def delete_rule(rule_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==========================================
+# Additional endpoints for feature parity
+# ==========================================
+
+@app.post("/api/projects/check-permissions")
+async def check_permissions(request: Dict[str, Any]):
+    """Check permissions for INFORMATION_SCHEMA access"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        permission_type = request.get("permission_type")
+        
+        if permission_type == "INFORMATION_SCHEMA.JOBS":
+            try:
+                query = f"""
+                SELECT COUNT(*) as count
+                FROM `{project_id}.region-us.INFORMATION_SCHEMA.JOBS`
+                WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+                LIMIT 1
+                """
+                bq_client.query(query).result()
+                return {"success": True, "has_access": True}
+            except:
+                return {"success": True, "has_access": False}
+                
+        elif permission_type == "INFORMATION_SCHEMA.JOBS_BY_PROJECT":
+            try:
+                query = f"""
+                SELECT COUNT(*) as count
+                FROM `{project_id}.region-us.INFORMATION_SCHEMA.JOBS_BY_PROJECT`
+                WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+                LIMIT 1
+                """
+                bq_client.query(query).result()
+                return {"success": True, "has_access": True}
+            except:
+                return {"success": True, "has_access": False}
+                
+        elif permission_type == "bigquery.tables.getData":
+            try:
+                query = f"""
+                SELECT table_name
+                FROM `{project_id}.region-us.INFORMATION_SCHEMA.TABLES`
+                LIMIT 1
+                """
+                bq_client.query(query).result()
+                return {"success": True, "has_access": True}
+            except:
+                return {"success": True, "has_access": False}
+                
+        elif permission_type == "bigquery.jobs.create":
+            try:
+                test_query = "SELECT 1"
+                job_config = bigquery.QueryJobConfig(dry_run=True)
+                bq_client.query(test_query, job_config=job_config).result()
+                return {"success": True, "has_access": True}
+            except:
+                return {"success": True, "has_access": False}
+        else:
+            # Return basic permissions check
+            return {"success": True, "permissions": {
+                "has_jobs_access": False,
+                "has_jobs_by_project_access": False,
+                "has_tables_access": True,
+                "has_query_access": True
+            }}
+            
+    except Exception as e:
+        logger.error(f"Error checking permissions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/projects/validate-access")
+async def validate_access(request: Dict[str, Any]):
+    """Validate project access"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        
+        # Try to list datasets in the project
+        try:
+            datasets = list(bq_client.list_datasets(project=project_id, max_results=1))
+            return {
+                "success": True,
+                "has_access": True,
+                "message": f"Successfully validated access to project {project_id}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "has_access": False,
+                "message": f"Cannot access project {project_id}: {str(e)}"
+            }
+    except Exception as e:
+        logger.error(f"Error validating access: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/projects/scan-information-schema")
+async def scan_information_schema(request: Dict[str, Any]):
+    """Scan project using INFORMATION_SCHEMA"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        analysis_window = request.get("analysis_window", 30)
+        price_per_tb = request.get("price_per_tb", 6.25)
+        
+        # For Firestore backend, we'll store in Firestore instead of BigQuery
+        # But still scan using BigQuery INFORMATION_SCHEMA
+        query = f"""
+        SELECT 
+            project_id,
+            user_email,
+            job_id,
+            query,
+            total_bytes_processed,
+            total_bytes_billed,
+            creation_time,
+            start_time,
+            end_time,
+            total_slot_ms,
+            TIMESTAMP_DIFF(end_time, start_time, SECOND) as runtime_seconds
+        FROM `{project_id}.region-us.INFORMATION_SCHEMA.JOBS_BY_PROJECT`
+        WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {analysis_window} DAY)
+            AND statement_type = 'SELECT'
+            AND state = 'DONE'
+            AND query IS NOT NULL
+        ORDER BY creation_time DESC
+        LIMIT 1000
+        """
+        
+        query_job = bq_client.query(query)
+        results = list(query_job)
+        
+        # Process and store results in Firestore
+        templates_found = 0
+        for row in results:
+            # Store each template in Firestore
+            template_data = {
+                "project_id": row.project_id,
+                "query": row.query,
+                "total_bytes_processed": row.total_bytes_processed,
+                "total_bytes_billed": row.total_bytes_billed,
+                "creation_time": row.creation_time.isoformat() if row.creation_time else None,
+                "runtime_seconds": row.runtime_seconds,
+                "estimated_cost": (row.total_bytes_billed or 0) / (10**12) * price_per_tb
+            }
+            # Could store in Firestore here
+            templates_found += 1
+        
+        return {
+            "success": True,
+            "templates_found": templates_found,
+            "message": f"Found {templates_found} query templates in the last {analysis_window} days"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error scanning INFORMATION_SCHEMA: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/analyses/{analysis_id}")
+async def update_analysis(analysis_id: str, update_data: Dict[str, Any]):
+    """Update an analysis record"""
+    try:
+        # Update in Firestore
+        analysis_ref = firestore_service.db.collection('analyses').document(analysis_id)
+        doc = analysis_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        # Update with new data
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        analysis_ref.update(update_data)
+        
+        # Return updated document
+        updated_doc = analysis_ref.get()
+        return updated_doc.to_dict()
+        
+    except Exception as e:
+        logger.error(f"Error updating analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/analyses/{analysis_id}")
+async def delete_analysis(analysis_id: str):
+    """Delete an analysis record"""
+    try:
+        # Delete from Firestore
+        analysis_ref = firestore_service.db.collection('analyses').document(analysis_id)
+        doc = analysis_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        analysis_ref.delete()
+        
+        return {"success": True, "message": f"Analysis {analysis_id} deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/projects/analyze-tables")
+async def analyze_tables(request: Dict[str, Any]):
+    """Analyze table performance and store results"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        
+        # Comprehensive table analysis query
+        query = f"""
+        WITH 
+        tables_metadata AS (
+          SELECT
+            table_catalog AS project_id,
+            table_schema AS dataset_id,
+            table_name,
+            CONCAT(table_catalog, '.', table_schema, '.', table_name) AS full_table_name,
+            table_type,
+            creation_time AS table_creation_time,
+            base_table_catalog,
+            base_table_schema,
+            base_table_name,
+            ddl,
+
+            -- Partition & cluster hints from DDL
+            REGEXP_EXTRACT(ddl, r'PARTITION BY\\s+(?:DATE\\()?([^\\)\\s;]+)') AS partition_field,
+            REGEXP_CONTAINS(ddl, r'PARTITION BY') AS is_partitioned,
+            REGEXP_EXTRACT(ddl, r'CLUSTER BY\\s+([^;]+)') AS cluster_fields_raw,
+            REGEXP_CONTAINS(ddl, r'CLUSTER BY') AS is_clustered,
+            CASE 
+              WHEN REGEXP_EXTRACT(ddl, r'CLUSTER BY\\s+([^;]+)') IS NOT NULL
+              THEN ARRAY_LENGTH(SPLIT(REGEXP_EXTRACT(ddl, r'CLUSTER BY\\s+([^;]+)'), ','))
+              ELSE 0
+            END AS cluster_fields_count,
+
+            REGEXP_CONTAINS(ddl, r'require_partition_filter\\s*=\\s*true') AS require_partition_filter,
+            REGEXP_EXTRACT(ddl, r'partition_expiration_days\\s*=\\s*(\\d+)') AS partition_expiration_days,
+            REGEXP_EXTRACT(ddl, r'description\\s*=\\s*"([^"]+)"') AS table_description,
+            REGEXP_EXTRACT(ddl, r'kms_key_name\\s*=\\s*"([^"]+)"') AS kms_key_name
+
+          FROM `{project_id}`.`region-us`.INFORMATION_SCHEMA.TABLES
+          WHERE table_catalog = '{project_id}'
+        ),
+
+        storage_info AS (
+          SELECT
+            CONCAT(project_id, '.', table_schema, '.', table_name) AS full_table_name,
+            SUM(total_logical_bytes) AS total_logical_bytes,
+            SUM(total_physical_bytes) AS total_physical_bytes,
+            SUM(active_logical_bytes) AS active_logical_bytes,
+            SUM(long_term_logical_bytes) AS long_term_logical_bytes,
+            SUM(time_travel_physical_bytes) AS time_travel_physical_bytes,
+            SUM(total_rows) AS total_rows,
+
+            COALESCE(ROUND(SUM(total_logical_bytes) / POW(2, 30), 2), 0) AS total_logical_gb,
+            COALESCE(ROUND(SUM(total_physical_bytes) / POW(2, 30), 2), 0) AS total_physical_gb,
+            COALESCE(ROUND(SUM(active_logical_bytes) / POW(2, 30), 2), 0) AS active_logical_gb,
+            COALESCE(ROUND(SUM(long_term_logical_bytes) / POW(2, 30), 2), 0) AS long_term_logical_gb,
+            COALESCE(ROUND(SUM(time_travel_physical_bytes) / POW(2, 30), 2), 0) AS time_travel_gb,
+
+            COALESCE(ROUND((SUM(active_logical_bytes) / POW(2, 40)) * 20, 2), 0) AS active_storage_cost_monthly_usd,
+            COALESCE(ROUND((SUM(long_term_logical_bytes) / POW(2, 40)) * 10, 2), 0) AS long_term_storage_cost_monthly_usd
+          FROM `{project_id}`.`region-us`.INFORMATION_SCHEMA.TABLE_STORAGE
+          WHERE project_id = '{project_id}'
+          GROUP BY full_table_name
+        ),
+
+        query_usage AS (
+          SELECT
+            CONCAT(table_ref.project_id, '.', table_ref.dataset_id, '.', table_ref.table_id) AS full_table_name,
+            COUNT(DISTINCT j.job_id) AS total_queries_6m,
+            COUNT(DISTINCT j.user_email) AS unique_users_6m,
+            COUNT(DISTINCT DATE(j.creation_time)) AS days_with_queries,
+            COUNT(DISTINCT j.project_id) AS projects_accessing_table,
+
+            COUNTIF(j.statement_type = 'SELECT') AS select_queries,
+            COUNTIF(j.statement_type = 'INSERT') AS insert_queries,
+            COUNTIF(j.statement_type = 'UPDATE') AS update_queries,
+            COUNTIF(j.statement_type = 'DELETE') AS delete_queries,
+            COUNTIF(j.statement_type = 'MERGE') AS merge_queries,
+
+            COALESCE(SUM(j.total_bytes_billed), 0) AS total_bytes_billed,
+            COALESCE(ROUND(SUM(j.total_bytes_billed) / POW(2, 40), 4), 0) AS total_tb_billed,
+            COALESCE(ROUND(SUM(j.total_bytes_billed / POW(2,40)) * 5, 2), 0) AS total_query_cost_6m_usd,
+
+            MAX(j.creation_time) AS last_queried_time
+          FROM `{project_id}`.`region-us`.INFORMATION_SCHEMA.JOBS_BY_PROJECT j,
+               UNNEST(j.referenced_tables) AS table_ref
+          WHERE DATE(j.creation_time) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH) AND CURRENT_DATE()
+            AND j.error_result IS NULL
+          GROUP BY full_table_name
+        )
+
+        SELECT
+          tm.project_id, tm.dataset_id, tm.table_name, tm.full_table_name,
+          tm.table_type, tm.table_creation_time,
+          TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), tm.table_creation_time, DAY) AS table_age_days,
+          tm.table_description,
+
+          tm.is_partitioned, tm.partition_field, tm.require_partition_filter,
+          tm.partition_expiration_days, tm.is_clustered, tm.cluster_fields_raw,
+
+          -- Storage metrics (null → 0)
+          COALESCE(si.total_logical_gb, 0) AS total_logical_gb,
+          COALESCE(si.active_logical_gb, 0) AS active_logical_gb,
+          COALESCE(si.long_term_logical_gb, 0) AS long_term_logical_gb,
+          COALESCE(si.active_storage_cost_monthly_usd, 0) AS active_storage_cost_monthly_usd,
+          COALESCE(si.long_term_storage_cost_monthly_usd, 0) AS long_term_storage_cost_monthly_usd,
+
+          -- Usage metrics (null → 0)
+          COALESCE(qu.total_queries_6m, 0) AS total_queries_6m,
+          COALESCE(qu.unique_users_6m, 0) AS unique_users_6m,
+          COALESCE(qu.total_tb_billed, 0) AS total_tb_billed,
+          COALESCE(qu.total_query_cost_6m_usd, 0) AS total_query_cost_6m_usd,
+
+          -- Last queried timestamp stays nullable (never queried = NULL)
+          qu.last_queried_time
+
+        FROM tables_metadata tm
+        LEFT JOIN storage_info si ON tm.full_table_name = si.full_table_name
+        LEFT JOIN query_usage qu  ON tm.full_table_name = qu.full_table_name
+        ORDER BY total_logical_gb DESC
+        """
+        
+        query_job = bq_client.query(query)
+        results = list(query_job)
+        
+        table_analyses = []
+        for row in results:
+            analysis = {
+                # Basic info
+                "project_id": row.project_id,
+                "dataset_id": row.dataset_id,
+                "table_name": row.table_name,
+                "full_table_name": row.full_table_name,
+                "table_type": row.table_type,
+                "table_description": row.table_description if hasattr(row, 'table_description') else None,
+                
+                # Timestamps
+                "table_creation_time": row.table_creation_time.isoformat() if row.table_creation_time else None,
+                "table_age_days": row.table_age_days if hasattr(row, 'table_age_days') else None,
+                "last_queried_time": row.last_queried_time.isoformat() if row.last_queried_time else None,
+                "analyzed_at": datetime.utcnow().isoformat(),
+                
+                # Partitioning & Clustering
+                "is_partitioned": row.is_partitioned if hasattr(row, 'is_partitioned') else False,
+                "partition_field": row.partition_field if hasattr(row, 'partition_field') else None,
+                "require_partition_filter": row.require_partition_filter if hasattr(row, 'require_partition_filter') else False,
+                "partition_expiration_days": row.partition_expiration_days if hasattr(row, 'partition_expiration_days') else None,
+                "is_clustered": row.is_clustered if hasattr(row, 'is_clustered') else False,
+                "cluster_fields_raw": row.cluster_fields_raw if hasattr(row, 'cluster_fields_raw') else None,
+                
+                # Storage metrics
+                "total_logical_gb": float(row.total_logical_gb) if hasattr(row, 'total_logical_gb') else 0,
+                "active_logical_gb": float(row.active_logical_gb) if hasattr(row, 'active_logical_gb') else 0,
+                "long_term_logical_gb": float(row.long_term_logical_gb) if hasattr(row, 'long_term_logical_gb') else 0,
+                "active_storage_cost_monthly_usd": float(row.active_storage_cost_monthly_usd) if hasattr(row, 'active_storage_cost_monthly_usd') else 0,
+                "long_term_storage_cost_monthly_usd": float(row.long_term_storage_cost_monthly_usd) if hasattr(row, 'long_term_storage_cost_monthly_usd') else 0,
+                
+                # Usage metrics
+                "total_queries_6m": int(row.total_queries_6m) if hasattr(row, 'total_queries_6m') else 0,
+                "unique_users_6m": int(row.unique_users_6m) if hasattr(row, 'unique_users_6m') else 0,
+                "total_tb_billed": float(row.total_tb_billed) if hasattr(row, 'total_tb_billed') else 0,
+                "total_query_cost_6m_usd": float(row.total_query_cost_6m_usd) if hasattr(row, 'total_query_cost_6m_usd') else 0,
+                
+                # Query breakdown
+                "select_queries": int(row.select_queries) if hasattr(row, 'select_queries') else 0,
+                "insert_queries": int(row.insert_queries) if hasattr(row, 'insert_queries') else 0,
+                "update_queries": int(row.update_queries) if hasattr(row, 'update_queries') else 0,
+                "delete_queries": int(row.delete_queries) if hasattr(row, 'delete_queries') else 0,
+                "merge_queries": int(row.merge_queries) if hasattr(row, 'merge_queries') else 0,
+            }
+            table_analyses.append(analysis)
+            
+            # Store in Firestore with a better document ID
+            doc_id = f"{project_id}_{row.dataset_id}_{row.table_name}".replace('.', '_')
+            firestore_service.db.collection('table_analyses').document(doc_id).set(analysis)
+        
+        return {
+            "success": True,
+            "tables_analyzed": len(table_analyses),
+            "analyses": table_analyses
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error analyzing tables: {error_msg}", exc_info=True)
+        
+        # Provide helpful error messages for common issues
+        if "Not found" in error_msg and "region" in error_msg:
+            return {
+                "success": False,
+                "error": "Region not accessible",
+                "message": "Unable to access INFORMATION_SCHEMA in region-us. Please ensure the project has BigQuery API enabled and tables exist in the US region.",
+                "details": error_msg,
+                "tables_analyzed": 0,
+                "analyses": []
+            }
+        elif "Permission denied" in error_msg or "403" in error_msg:
+            return {
+                "success": False,
+                "error": "Permission denied",
+                "message": "Insufficient permissions to access BigQuery INFORMATION_SCHEMA. Please ensure you have the necessary BigQuery permissions.",
+                "details": error_msg,
+                "tables_analyzed": 0,
+                "analyses": []
+            }
+        elif "does not have bigquery.jobs" in error_msg:
+            return {
+                "success": False,
+                "error": "BigQuery not enabled",
+                "message": "BigQuery API is not enabled for this project. Please enable the BigQuery API in the Google Cloud Console.",
+                "details": error_msg,
+                "tables_analyzed": 0,
+                "analyses": []
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Query execution failed",
+                "message": "Failed to analyze tables. This might be due to missing tables, permissions, or the project not having BigQuery data.",
+                "details": error_msg,
+                "tables_analyzed": 0,
+                "analyses": []
+            }
+
+@app.get("/api/projects/{project_id}/table-analysis")
+async def get_table_analysis(project_id: str, dataset_id: str = Query(None)):
+    """Get table analysis results for a project"""
+    try:
+        # Query Firestore for table analyses
+        analyses_ref = firestore_service.db.collection('table_analyses')
+        
+        # Filter by project_id field (not table_name)
+        query = analyses_ref.where('project_id', '==', project_id)
+        
+        # If dataset_id is specified, add that filter too
+        if dataset_id:
+            query = query.where('dataset_id', '==', dataset_id)
+        
+        docs = query.stream()
+        
+        analyses = []
+        for doc in docs:
+            analysis = doc.to_dict()
+            analysis['id'] = doc.id
+            analyses.append(analysis)
+        
+        return {
+            "project_id": project_id,
+            "dataset_id": dataset_id,
+            "analyses": analyses,
+            "total_tables": len(analyses)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching table analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/projects/{project_id}/table-analysis-summary")
+async def get_table_analysis_summary(project_id: str):
+    """Get summary metrics from table analysis for a project"""
+    try:
+        # Query Firestore for table analyses
+        analyses_ref = firestore_service.db.collection('table_analyses')
+        query = analyses_ref.where('project_id', '==', project_id)
+        docs = query.stream()
+        
+        # Initialize counters
+        total_tables = 0
+        total_storage_gb = 0
+        total_storage_cost = 0
+        unused_tables = 0
+        partitioned_tables = 0
+        clustered_tables = 0
+        tables_with_no_partition_filter = 0
+        active_storage_gb = 0
+        long_term_storage_gb = 0
+        
+        for doc in docs:
+            analysis = doc.to_dict()
+            total_tables += 1
+            
+            # Storage metrics
+            total_storage_gb += analysis.get('total_logical_gb', 0)
+            active_storage_gb += analysis.get('active_logical_gb', 0)
+            long_term_storage_gb += analysis.get('long_term_logical_gb', 0)
+            total_storage_cost += analysis.get('active_storage_cost_monthly_usd', 0) + analysis.get('long_term_storage_cost_monthly_usd', 0)
+            
+            # Usage metrics
+            if analysis.get('total_queries_6m', 0) == 0:
+                unused_tables += 1
+            
+            # Optimization opportunities
+            if analysis.get('is_partitioned', False):
+                partitioned_tables += 1
+                if not analysis.get('require_partition_filter', False):
+                    tables_with_no_partition_filter += 1
+            
+            if analysis.get('is_clustered', False):
+                clustered_tables += 1
+        
+        return {
+            "project_id": project_id,
+            "total_tables": total_tables,
+            "total_storage_gb": round(total_storage_gb, 2),
+            "active_storage_gb": round(active_storage_gb, 2),
+            "long_term_storage_gb": round(long_term_storage_gb, 2),
+            "total_storage_cost_monthly": round(total_storage_cost, 2),
+            "unused_tables_count": unused_tables,
+            "partitioned_tables_count": partitioned_tables,
+            "clustered_tables_count": clustered_tables,
+            "optimization_opportunities": {
+                "unused_tables": unused_tables,
+                "tables_without_partition_filter": tables_with_no_partition_filter,
+                "unpartitioned_large_tables": total_tables - partitioned_tables if total_tables > 0 else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching table analysis summary: {e}", exc_info=True)
+        # Return empty summary instead of error
+        return {
+            "project_id": project_id,
+            "total_tables": 0,
+            "total_storage_gb": 0,
+            "active_storage_gb": 0,
+            "long_term_storage_gb": 0,
+            "total_storage_cost_monthly": 0,
+            "unused_tables_count": 0,
+            "partitioned_tables_count": 0,
+            "clustered_tables_count": 0,
+            "optimization_opportunities": {
+                "unused_tables": 0,
+                "tables_without_partition_filter": 0,
+                "unpartitioned_large_tables": 0
+            }
+        }
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""

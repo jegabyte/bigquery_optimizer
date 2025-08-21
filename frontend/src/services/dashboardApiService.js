@@ -17,7 +17,7 @@ class DashboardApiService {
     try {
       // Add timeout to prevent hanging requests
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for dashboard
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for dashboard
       
       const response = await fetch(`${this.baseUrl}/api/dashboard/stats`, {
         method: 'GET',

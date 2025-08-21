@@ -15,11 +15,13 @@ import {
   FiMapPin,
   FiDatabase,
   FiTag,
-  FiAlertTriangle
+  FiAlertTriangle,
+  FiCheckCircle
 } from 'react-icons/fi';
 import TemplatesGrid from './TemplatesGrid';
 import TemplateDetails from './TemplateDetails';
 import TableAnalysis from './TableAnalysis';
+import ConfirmDialog from '../ConfirmDialog';
 import { formatCost } from '../../services/projectsMockData';
 import { projectsApiService } from '../../services/projectsApiService';
 import { optimizeQueryWithADK } from '../../services/adk';
@@ -36,6 +38,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
   const [analyzingTemplates, setAnalyzingTemplates] = useState(new Set());
   const [analysisResults, setAnalysisResults] = useState({});
   const [analysisStatuses, setAnalysisStatuses] = useState({});
+  const [tableAnalysisSummary, setTableAnalysisSummary] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Fetch templates when component mounts or project changes
   useEffect(() => {
@@ -112,6 +116,27 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
     return () => {
       mounted = false;
     };
+  }, [project]);
+
+  // Fetch table analysis summary when component mounts or project changes
+  useEffect(() => {
+    const fetchTableAnalysisSummary = async () => {
+      if (!project?.projectId) return;
+      
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8001'}/api/projects/${project.projectId}/table-analysis-summary`
+        );
+        if (response.ok) {
+          const summary = await response.json();
+          setTableAnalysisSummary(summary);
+        }
+      } catch (error) {
+        console.error('Failed to fetch table analysis summary:', error);
+      }
+    };
+    
+    fetchTableAnalysisSummary();
   }, [project]);
 
   const handleTemplateClick = (template) => {
@@ -343,12 +368,7 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
             </div>
             <div className="flex items-center space-x-3">
               <button
-                onClick={() => {
-                  if (confirm('Are you sure you want to remove this project?')) {
-                    onRemove(project.id);
-                    onBack();
-                  }
-                }}
+                onClick={() => setDeleteConfirm(true)}
                 className="px-4 py-2 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 flex items-center space-x-2"
               >
                 <FiTrash2 className="h-4 w-4" />
@@ -361,7 +381,8 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
 
       {/* Key Metrics */}
       <div className="px-4 sm:px-6 lg:px-8 py-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Query Metrics Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -456,6 +477,109 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
             </div>
           </motion.div>
         </div>
+
+        {/* Table Metrics Row (if summary is available) */}
+        {tableAnalysisSummary && tableAnalysisSummary.total_tables > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Total Tables</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {tableAnalysisSummary.total_tables}
+                  </p>
+                </div>
+                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/30 rounded">
+                  <FiDatabase className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Total Storage</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {tableAnalysisSummary.total_storage_gb.toFixed(1)} GB
+                  </p>
+                </div>
+                <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded">
+                  <FiDatabase className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Storage Cost</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    ${tableAnalysisSummary.total_storage_cost_monthly.toFixed(0)}
+                  </p>
+                </div>
+                <div className="p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded">
+                  <FiDollarSign className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Unused Tables</p>
+                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">
+                    {tableAnalysisSummary.unused_tables_count}
+                  </p>
+                </div>
+                <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded">
+                  <FiAlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9 }}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Optimized Tables</p>
+                  <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">
+                    {tableAnalysisSummary.partitioned_tables_count}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {tableAnalysisSummary.clustered_tables_count} clustered
+                  </p>
+                </div>
+                <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded">
+                  <FiCheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -621,6 +745,22 @@ const ProjectDetailView = ({ project, onBack, onRefresh, onEdit, onRemove, onPau
         onAnalyze={handleAnalyzeTemplate}
         analysisStatus={selectedTemplate ? analysisStatuses[selectedTemplate.id] : null}
         analysisResult={selectedTemplate ? analysisResults[selectedTemplate.id] : null}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm}
+        onClose={() => setDeleteConfirm(false)}
+        onConfirm={() => {
+          onRemove(project.projectId || project.id);
+          onBack();
+          setDeleteConfirm(false);
+        }}
+        title="Delete Project"
+        message="Are you sure you want to remove this project? This will delete all associated templates and analyses."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   FiPlus, 
@@ -12,16 +13,20 @@ import {
 import ProjectCard from '../components/projects/ProjectCard';
 import ProjectDetailView from '../components/projects/ProjectDetailView';
 import ProjectOnboarding from '../components/projects/ProjectOnboarding';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { formatCost } from '../services/projectsMockData';
 import { projectsApiService } from '../services/projectsApiService';
 import toast from 'react-hot-toast';
 
 const Projects = () => {
+  const { projectId } = useParams();
+  const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true); // Start with loading true
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, projectId: null });
 
   // Fetch projects on component mount
   useEffect(() => {
@@ -30,6 +35,17 @@ const Projects = () => {
       try {
         const data = await projectsApiService.getProjects();
         setProjects(data);
+        
+        // If projectId is in URL, select that project
+        if (projectId && data.length > 0) {
+          const project = data.find(p => p.projectId === projectId);
+          if (project) {
+            setSelectedProject(project);
+          } else {
+            // Project not found, navigate back to projects list
+            navigate('/projects');
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch projects:', error);
       } finally {
@@ -37,14 +53,18 @@ const Projects = () => {
       }
     };
     fetchProjects();
-  }, []);
+  }, [projectId, navigate]);
 
   const handleSelectProject = (project) => {
     setSelectedProject(project);
+    // Update URL to include project ID
+    navigate(`/projects/${project.projectId}`);
   };
 
   const handleBackToProjects = () => {
     setSelectedProject(null);
+    // Navigate back to projects list
+    navigate('/projects');
   };
 
   const handleRefreshProject = async (projectId) => {
@@ -71,41 +91,46 @@ const Projects = () => {
     // TODO: Open edit modal
   };
 
-  const handleRemoveProject = async (projectId) => {
-    if (confirm('Are you sure you want to remove this project? This will delete all associated templates and analyses.')) {
-      const loadingToast = toast.loading('Deleting project...');
+  const handleRemoveProject = (projectId) => {
+    setDeleteConfirm({ isOpen: true, projectId });
+  };
+
+  const confirmRemoveProject = async () => {
+    const projectId = deleteConfirm.projectId;
+    const loadingToast = toast.loading('Deleting project...');
+    
+    try {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8001'}/api/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
       
-      try {
-        const response = await fetch(`${import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8001'}/api/projects/${projectId}`, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to delete project');
-        }
-        
-        const result = await response.json();
-        
-        toast.dismiss(loadingToast);
-        toast.success('Project deleted successfully');
-        
-        // Update local state - check all possible ID fields
-        setProjects(projects.filter(p => p.projectId !== projectId && p.project_id !== projectId && p.id !== projectId));
-        if (selectedProject?.projectId === projectId || selectedProject?.project_id === projectId || selectedProject?.id === projectId) {
-          setSelectedProject(null);
-        }
-        
-        // Refresh projects list
-        const data = await projectsApiService.getProjects();
-        setProjects(data);
-      } catch (error) {
-        toast.dismiss(loadingToast);
-        toast.error('Failed to delete project: ' + error.message);
-        console.error('Delete project error:', error);
+      if (!response.ok) {
+        throw new Error('Failed to delete project');
       }
+      
+      const result = await response.json();
+      
+      toast.dismiss(loadingToast);
+      toast.success('Project deleted successfully');
+      
+      // Update local state - check all possible ID fields
+      setProjects(projects.filter(p => p.projectId !== projectId && p.project_id !== projectId && p.id !== projectId));
+      if (selectedProject?.projectId === projectId || selectedProject?.project_id === projectId || selectedProject?.id === projectId) {
+        setSelectedProject(null);
+      }
+      
+      // Refresh projects list
+      const data = await projectsApiService.getProjects();
+      setProjects(data);
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      toast.error('Failed to delete project: ' + error.message);
+      console.error('Delete project error:', error);
+    } finally {
+      setDeleteConfirm({ isOpen: false, projectId: null });
     }
   };
 
@@ -123,6 +148,15 @@ const Projects = () => {
       const data = await projectsApiService.getProjects();
       setProjects(data);
       setIsOnboardingOpen(false);
+      
+      // Navigate to the new project if we have the projectId
+      if (newProject?.projectId) {
+        const project = data.find(p => p.projectId === newProject.projectId);
+        if (project) {
+          setSelectedProject(project);
+          navigate(`/projects/${project.projectId}`);
+        }
+      }
       
       // If this is called after background scan completes, refresh again
       if (newProject?.refresh) {
@@ -374,6 +408,18 @@ const Projects = () => {
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
         onComplete={handleOnboardingComplete}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, projectId: null })}
+        onConfirm={confirmRemoveProject}
+        title="Delete Project"
+        message="Are you sure you want to remove this project? This will delete all associated templates and analyses."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
       />
     </div>
   );

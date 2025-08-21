@@ -49,6 +49,7 @@ function App() {
               <Route path="analysis/:analysisId/new" element={<AnalysisResult />} />
               <Route path="analysis/:analysisId" element={<AnalysisResult />} />
               <Route path="projects" element={<Projects />} />
+              <Route path="projects/:projectId" element={<Projects />} />
               <Route path="rules" element={<RulesManagement />} />
             </Route>
           </Routes>

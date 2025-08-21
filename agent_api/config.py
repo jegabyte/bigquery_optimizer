@@ -35,6 +35,10 @@ class Config:
     VERTEX_AI_LOCATION: str = os.getenv('VERTEX_AI_LOCATION', 'us-central1')
     VERTEX_AI_PROJECT: str = os.getenv('VERTEX_AI_PROJECT', GCP_PROJECT_ID)
     
+    # Backend API Configuration
+    BACKEND_API_URL: str = os.getenv('BACKEND_API_URL', 'http://localhost:8001')
+    BACKEND_API_TIMEOUT: int = int(os.getenv('BACKEND_API_TIMEOUT', '30'))
+    
     @classmethod
     def get_full_table_id(cls, table_name: str) -> str:
         """Get fully qualified BigQuery table ID"""

@@ -310,20 +310,23 @@ class FirestoreService:
     # ==================== Dashboard Operations ====================
     
     def get_dashboard_stats(self) -> Dict[str, Any]:
-        """Get dashboard statistics from Firestore"""
+        """Get dashboard statistics from Firestore - optimized version"""
         try:
-            # Get active projects
-            projects = self.get_projects(active_only=True)
-            
-            # Calculate statistics
+            # Get active projects count more efficiently
+            projects_query = self.projects_collection.where('is_active', '==', True).limit(100)
+            projects = []
+            for doc in projects_query.stream():
+                projects.append(doc.id)
             total_projects = len(projects)
+            
+            # Initialize counters
             total_templates = 0
             total_runs = 0
             total_bytes = 0
             
-            # Get ALL templates in one query (more efficient than nested queries)
+            # Get a smaller subset of templates for stats (limit to 100 for faster response)
             all_templates = []
-            templates_query = self.templates_collection.limit(500)  # Limit to prevent timeout
+            templates_query = self.templates_collection.limit(100)
             
             for template_doc in templates_query.stream():
                 template = template_doc.to_dict()
@@ -333,26 +336,31 @@ class FirestoreService:
                 total_runs += template.get('total_runs', 0)
                 total_bytes += template.get('total_bytes_processed', 0)
             
-            # Sort templates in memory for recent templates (avoid Firestore index requirement)
-            all_templates_with_last_seen = [t for t in all_templates if t.get('last_seen')]
-            all_templates_with_last_seen.sort(key=lambda x: x.get('last_seen', ''), reverse=True)
-            recent_templates = all_templates_with_last_seen[:10]
+            # For recent templates, get only the most recent 10
+            recent_templates = []
+            if all_templates:
+                # Sort by last_seen for recent templates
+                templates_with_last_seen = [t for t in all_templates if t.get('last_seen')]
+                templates_with_last_seen.sort(key=lambda x: x.get('last_seen', ''), reverse=True)
+                recent_templates = templates_with_last_seen[:10]
             
-            # Sort templates in memory for top cost drivers (avoid Firestore index requirement)
-            all_templates.sort(key=lambda x: x.get('total_bytes_processed', 0), reverse=True)
+            # For top cost drivers, sort by bytes processed
             cost_drivers = []
-            for template in all_templates[:5]:
-                template['estimated_cost'] = (template.get('total_bytes_processed', 0) / 1e12) * 5.00
-                cost_drivers.append(template)
+            if all_templates:
+                # Sort by total_bytes_processed
+                all_templates.sort(key=lambda x: x.get('total_bytes_processed', 0), reverse=True)
+                for template in all_templates[:5]:
+                    template['estimated_cost'] = (template.get('total_bytes_processed', 0) / 1e12) * 5.00
+                    cost_drivers.append(template)
             
             return {
                 'stats': {
                     'total_projects': total_projects,
                     'total_templates': total_templates,
                     'total_query_runs': total_runs,
-                    'total_tb_processed': total_bytes / 1e12,
-                    'avg_runtime_seconds': 0,  # Would need to calculate
-                    'total_cost_estimate': (total_bytes / 1e12) * 5.00
+                    'total_tb_processed': round(total_bytes / 1e12, 2) if total_bytes > 0 else 0,
+                    'avg_runtime_seconds': 0,  # Would need to calculate from runs
+                    'total_cost_estimate': round((total_bytes / 1e12) * 5.00, 2) if total_bytes > 0 else 0
                 },
                 'recent_templates': recent_templates,
                 'top_cost_drivers': cost_drivers,

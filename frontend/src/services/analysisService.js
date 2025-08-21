@@ -184,34 +184,21 @@ export const analysisService = {
       }
       
       const analysis = await response.json();
+      console.log('Raw analysis from backend:', analysis);
       
-      // Format the response to match expected structure
+      // Return the raw analysis data as-is (it already has the correct structure)
+      // The backend returns: { query, options, result, stage_data, timestamp, project_id, user_id }
       return {
-        id: analysis.analysis_id || analysisId,
-        query: analysis.original_query || analysis.query || '',
-        timestamp: analysis.created_at || analysis.timestamp,
-        result: {
-          query: analysis.original_query || '',
-          optimizedQuery: analysis.optimized_query || '',
-          issues: analysis.issues_found || [],
-          validationResult: {
-            costSavings: analysis.savings_percentage ? `${analysis.savings_percentage}%` : '0%',
-            bytesProcessedOriginal: analysis.original_bytes_processed,
-            bytesProcessedOptimized: analysis.optimized_bytes_processed,
-            bytesSaved: analysis.bytes_saved
-          },
-          metadata: {
-            stages: analysis.stage_data || {}
-          }
-        },
-        project_id: analysis.project_id,
+        id: analysis.id || analysis.analysis_id || analysisId,
+        query: analysis.query || '',
+        options: analysis.options || {},
+        result: analysis.result || {},
         stage_data: analysis.stage_data || {},
-        options: {
-          projectId: analysis.project_id,
-          validate: true,
-          rewrite: true,
-          projectName: 'Optimization Project'
-        }
+        timestamp: analysis.timestamp || analysis.created_at,
+        project_id: analysis.project_id,
+        user_id: analysis.user_id,
+        // Keep backward compatibility fields
+        created_at: analysis.created_at || analysis.timestamp
       };
     } catch (error) {
       console.error('Failed to get analysis from Backend API:', error);

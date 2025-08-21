@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiPlus, FiCheckCircle, FiAlertCircle, FiSearch, FiFilter, FiChevronDown, FiEye, FiTrendingUp, FiClock, FiZap } from 'react-icons/fi';
+import { FiPlus, FiCheckCircle, FiAlertCircle, FiSearch, FiFilter, FiChevronDown, FiEye, FiTrendingUp, FiClock, FiZap, FiTrash2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { getRecentAnalyses, isFirestoreAvailable } from '../services/analysisService';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const QueryAnalysis = () => {
   const navigate = useNavigate();
@@ -11,6 +12,7 @@ const QueryAnalysis = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, analysisId: null });
 
   useEffect(() => {
     loadAnalyses();
@@ -65,6 +67,37 @@ const QueryAnalysis = () => {
 
   const handleAnalysisClick = (analysisId) => {
     navigate(`/analysis/${analysisId}`);
+  };
+
+  const handleDeleteAnalysis = (analysisId) => {
+    setDeleteConfirm({ isOpen: true, analysisId });
+  };
+
+  const confirmDelete = async () => {
+    const analysisId = deleteConfirm.analysisId;
+    
+    try {
+      // Call the delete API
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8001'}/api/analyses/${analysisId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        toast.success('Analysis deleted successfully');
+        // Remove from local state
+        setAnalyses(prevAnalyses => prevAnalyses.filter(a => a.id !== analysisId));
+      } else {
+        throw new Error('Failed to delete analysis');
+      }
+    } catch (error) {
+      console.error('Error deleting analysis:', error);
+      toast.error('Failed to delete analysis');
+    } finally {
+      setDeleteConfirm({ isOpen: false, analysisId: null });
+    }
   };
 
   const truncateQuery = (query, maxLength = 45) => {
@@ -245,11 +278,6 @@ const QueryAnalysis = () => {
                             {truncateQuery(analysis.query)}
                           </p>
                         </div>
-                        {analysis.optimized && (
-                          <span className="px-1.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700 flex-shrink-0">
-                            Optimized
-                          </span>
-                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -294,13 +322,21 @@ const QueryAnalysis = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <button
-                        onClick={() => handleAnalysisClick(analysis.id)}
-                        className="text-primary-600 hover:text-primary-700 font-medium text-xs flex items-center gap-1"
-                      >
-                        <FiEye className="h-4 w-4" />
-                        <span>View</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleAnalysisClick(analysis.id)}
+                          className="text-primary-600 hover:text-primary-700 font-medium text-xs flex items-center gap-1"
+                        >
+                          <FiEye className="h-4 w-4" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAnalysis(analysis.id)}
+                          className="text-red-600 hover:text-red-700 font-medium text-xs flex items-center gap-1"
+                        >
+                          <FiTrash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -316,6 +352,18 @@ const QueryAnalysis = () => {
           Showing {filteredAnalyses.length} {filteredAnalyses.length === 1 ? 'analysis' : 'analyses'}
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, analysisId: null })}
+        onConfirm={confirmDelete}
+        title="Delete Analysis"
+        message="Are you sure you want to delete this analysis? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 };

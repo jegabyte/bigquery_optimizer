@@ -19,5 +19,18 @@ ENV APP_ENV="production"
 # Expose port
 EXPOSE 8001
 
-# Run the Firestore-based application
-CMD ["uvicorn", "main_firestore:app", "--host", "0.0.0.0", "--port", "8001"]
+# Default to BigQuery backend (can be overridden with BACKEND_TYPE env var)
+ENV BACKEND_TYPE="bigquery"
+
+# Create a startup script that selects the right main file based on BACKEND_TYPE
+RUN echo '#!/bin/sh\n\
+if [ "$BACKEND_TYPE" = "firestore" ]; then\n\
+    echo "Starting Firestore backend (main_firestore.py)..."\n\
+    exec uvicorn main_firestore:app --host 0.0.0.0 --port 8001\n\
+else\n\
+    echo "Starting BigQuery backend (main.py)..."\n\
+    exec uvicorn main:app --host 0.0.0.0 --port 8001\n\
+fi' > /app/start.sh && chmod +x /app/start.sh
+
+# Run the startup script
+CMD ["/app/start.sh"]

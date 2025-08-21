@@ -5,10 +5,15 @@
 # ================================================================
 # Usage:
 #   ./deploy.sh              # Show help
-#   ./deploy.sh deploy       # Deploy both frontend and agent_api
+#   ./deploy.sh remote       # Deploy all services to Cloud Run
 #   ./deploy.sh local        # Start local development
 #   ./deploy.sh destroy      # Destroy all services
 #   ./deploy.sh status       # Check deployment status
+#
+# Backend Selection:
+#   ./deploy.sh remote --backend=firestore   # Deploy with Firestore backend
+#   ./deploy.sh remote --backend=bigquery    # Deploy with BigQuery backend (default)
+#   ./deploy.sh local --backend=firestore    # Run locally with Firestore
 # ================================================================
 
 set -e
@@ -56,6 +61,37 @@ export FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 # CORS Configuration
 export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}"
+
+# Backend Configuration (bigquery or firestore)
+export BACKEND_TYPE="${BACKEND_TYPE:-bigquery}"  # Default to BigQuery backend
+
+# Parse command line arguments
+# Look for --backend or --db flags anywhere in the arguments
+for i in "$@"; do
+    case $i in
+        --backend=*|--db=*)
+            BACKEND_TYPE="${i#*=}"
+            ;;
+    esac
+done
+
+# Validate backend type
+if [[ "$BACKEND_TYPE" != "bigquery" && "$BACKEND_TYPE" != "firestore" ]]; then
+    echo "ERROR: Invalid backend type: $BACKEND_TYPE"
+    echo "Valid options are: bigquery, firestore"
+    exit 1
+fi
+
+# Set the main file based on backend type
+if [ "$BACKEND_TYPE" = "firestore" ]; then
+    BACKEND_MAIN_FILE="main_firestore.py"
+    echo "Using Firestore backend"
+else
+    BACKEND_MAIN_FILE="main.py"
+    echo "Using BigQuery backend"
+fi
+
+export BACKEND_MAIN_FILE
 
 # Validate required environment variables
 if [ -z "$GCP_PROJECT_ID" ]; then
@@ -128,7 +164,7 @@ deploy_agent_api() {
         --with_ui \
         --port=8000 \
         --allow_origins="*" \
-        --set-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,BQ_PROJECT_ID=$BQ_PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_LOCATION=$BQ_LOCATION,APP_ENV=$APP_ENV"
+        --set-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,BQ_PROJECT_ID=$BQ_PROJECT_ID,BQ_DATASET=$BQ_DATASET,BQ_LOCATION=$BQ_LOCATION,APP_ENV=$APP_ENV,BACKEND_API_URL=https://${BACKEND_API_SERVICE}-${REGION}.a.run.app"
     
     AGENT_API_URL=$(gcloud run services describe $AGENT_API_SERVICE \
         --region=$REGION \
@@ -158,7 +194,7 @@ deploy_backend_api() {
         --platform managed \
         --region ${REGION} \
         --allow-unauthenticated \
-        --set-env-vars GCP_PROJECT_ID=${GCP_PROJECT_ID},BQ_PROJECT_ID=${BQ_PROJECT_ID},BQ_DATASET=${BQ_DATASET},BQ_LOCATION=${BQ_LOCATION},APP_ENV=${APP_ENV},GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID} \
+        --set-env-vars GCP_PROJECT_ID=${GCP_PROJECT_ID},BQ_PROJECT_ID=${BQ_PROJECT_ID},BQ_DATASET=${BQ_DATASET},BQ_LOCATION=${BQ_LOCATION},APP_ENV=${APP_ENV},GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID},BACKEND_TYPE=${BACKEND_TYPE},BACKEND_MAIN_FILE=${BACKEND_MAIN_FILE} \
         --memory 512Mi \
         --timeout 60 \
         --max-instances 10 \
@@ -334,8 +370,10 @@ start_local() {
     export BQ_PROJECT_ID=$BQ_PROJECT_ID
     export BQ_DATASET=$BQ_DATASET
     export APP_ENV=${APP_ENV:-development}
+    export BACKEND_API_URL="http://localhost:$BACKEND_API_PORT"
     
     # Start the agent_api server (no app parameter needed)
+    # It will fetch rules from Backend API instead of direct DB access
     adk api_server --port $AGENT_API_PORT --allow_origins="*" &
     AGENT_API_PID=$!
     print_success "Agent API AI started on http://localhost:$AGENT_API_PORT (PID: $AGENT_API_PID)"
@@ -397,11 +435,18 @@ start_local() {
     export BQ_LOCATION=$BQ_LOCATION
     export APP_ENV=${APP_ENV:-development}
     
-    # Start the Backend API server
-    python main.py &
+    # Start the Backend API server with selected backend
+    if [ "$BACKEND_TYPE" = "firestore" ]; then
+        print_info "Starting Backend API with Firestore backend..."
+        python main_firestore.py &
+    else
+        print_info "Starting Backend API with BigQuery backend..."
+        python main.py &
+    fi
     BACKEND_API_PID=$!
     print_success "Backend API started on http://localhost:$BACKEND_API_PORT (PID: $BACKEND_API_PID)"
     print_info "  - API Docs: http://localhost:$BACKEND_API_PORT/docs"
+    print_info "  - Backend Type: $BACKEND_TYPE"
     
     cd ..
     
@@ -492,6 +537,9 @@ start_agent_api_local() {
     print_info "Press Ctrl+C to stop"
     echo ""
     
+    # Set Backend API URL for agent to fetch rules from
+    export BACKEND_API_URL="http://localhost:$BACKEND_API_PORT"
+    
     # Run in foreground with logs visible (no app parameter needed)
     adk api_server --port $AGENT_API_PORT --allow_origins="*"
 }
@@ -541,7 +589,14 @@ start_backend_api_local() {
     export APP_ENV=$APP_ENV
     
     # Run in foreground with logs visible
-    uvicorn main:app --host 0.0.0.0 --port $BACKEND_API_PORT --reload
+    # Use the selected backend (main.py for bigquery, main_firestore.py for firestore)
+    if [ "$BACKEND_TYPE" = "firestore" ]; then
+        print_info "Starting with Firestore backend (main_firestore.py)..."
+        uvicorn main_firestore:app --host 0.0.0.0 --port $BACKEND_API_PORT --reload
+    else
+        print_info "Starting with BigQuery backend (main.py)..."
+        uvicorn main:app --host 0.0.0.0 --port $BACKEND_API_PORT --reload
+    fi
 }
 
 # Start Frontend Only (Local)
@@ -700,7 +755,22 @@ main() {
         fi
     fi
     
-    case "${1:-help}" in
+    # Get the first non-flag argument as the command
+    ACTION="help"
+    for arg in "$@"; do
+        case $arg in
+            --backend=*|--db=*)
+                # Skip flags
+                ;;
+            *)
+                # This is our command
+                ACTION="$arg"
+                break
+                ;;
+        esac
+    done
+    
+    case "$ACTION" in
         # Remote deployment commands (Cloud Run)
         remote)
             deploy_agent_api
@@ -765,9 +835,20 @@ main() {
             echo "  status                - Check deployment status"
             echo "  destroy               - Delete all Cloud Run services"
             echo ""
-            echo "CONFIGURATION:"
+            echo "BACKEND OPTIONS:"
+            echo "  --backend=bigquery    - Use BigQuery tables for storage (default)"
+            echo "  --backend=firestore   - Use Firestore for storage"
+            echo "  --db=bigquery         - Alias for --backend"
+            echo "  --db=firestore        - Alias for --backend"
+            echo ""
+            echo "EXAMPLES:"
+            echo "  $0 remote --backend=firestore    # Deploy with Firestore backend"
+            echo "  $0 local --db=bigquery           # Run locally with BigQuery backend"
+            echo ""
+            echo "CURRENT CONFIGURATION:"
             echo "  Project:     $GCP_PROJECT_ID"
             echo "  BQ Dataset:  $BQ_DATASET"
+            echo "  Backend:     $BACKEND_TYPE"
             echo "  Region:      $REGION"
             echo "  Environment: $APP_ENV"
             echo ""

@@ -17,17 +17,26 @@ logger = logging.getLogger(__name__)
 from .bigquery_metadata import fetch_tables_metadata, bigquery_dry_run
 from .callbacks import create_streaming_callback
 
-# Try to import BigQuery rules first, then fallback to Firestore
+# Import Backend API client for fetching rules
+try:
+    from .backend_api_client import backend_client
+    logger.info("Backend API client initialized for rules fetching")
+    backend_api_available = True
+except ImportError as e:
+    logger.warning(f"Could not import backend_api_client: {e}")
+    backend_client = None
+    backend_api_available = False
+
+# Keep direct DB access as fallback only
 try:
     from .bigquery_rules import fetch_rules_from_bigquery
-    logger.info("BigQuery rules loader available")
+    logger.info("BigQuery rules loader available (fallback)")
     fetch_rules_from_bigquery_available = True
 except ImportError as e:
     logger.warning(f"Could not import bigquery_rules: {e}")
     fetch_rules_from_bigquery = None
     fetch_rules_from_bigquery_available = False
 
-# Fallback to Firestore if BigQuery not available
 try:
     from .firestore_rules import fetch_rules_from_firestore
     logger.info("Firestore rules loader available (fallback)")
@@ -42,17 +51,26 @@ DATASET = os.getenv("BQ_DATASET", os.getenv("BIGQUERY_DATASET", "bq_optimizer"))
 
 # --- Load Rules ---
 def load_bq_anti_patterns():
-    """Load BigQuery anti-patterns from BigQuery (primary), Firestore (secondary), or YAML file (fallback)"""
-    # Try to load from BigQuery first
+    """Load BigQuery anti-patterns from Backend API (primary), or direct DB access (fallback)"""
+    # Try to load from Backend API first (preferred)
+    if backend_api_available and backend_client is not None:
+        try:
+            patterns_content = backend_client.fetch_rules()
+            logger.info("✅ Loaded BigQuery anti-patterns from Backend API")
+            return patterns_content
+        except Exception as api_error:
+            logger.warning(f"⚠️  Failed to load from Backend API: {api_error}")
+    
+    # Fallback to direct BigQuery access if Backend API is not available
     if fetch_rules_from_bigquery_available and fetch_rules_from_bigquery is not None:
         try:
             patterns_content = fetch_rules_from_bigquery(PROJECT_ID)
-            logger.info("✅ Loaded BigQuery anti-patterns from BigQuery table")
+            logger.info("✅ Loaded BigQuery anti-patterns from BigQuery table (fallback)")
             return patterns_content
         except Exception as bq_error:
             logger.warning(f"⚠️  Failed to load from BigQuery: {bq_error}")
     
-    # Try Firestore as second option
+    # Try Firestore as third option
     if fetch_rules_from_firestore is not None:
         try:
             patterns_content = fetch_rules_from_firestore(PROJECT_ID)
