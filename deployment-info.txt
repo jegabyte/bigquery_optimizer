@@ -1,0 +1,10 @@
+BigQuery Optimizer Deployment Info
+Generated: Sat Aug 23 12:22:11 +08 2025
+
+Project: aiva-e74f3
+Region: us-central1
+Backend: firestore
+
+Frontend URL: https://aiva-e74f3.uc.r.appspot.com
+Agent API URL: https://bigquery-optimizer-agent-api-puql6kbaxq-uc.a.run.app
+Backend API URL: https://bigquery-optimizer-backend-api-puql6kbaxq-uc.a.run.app

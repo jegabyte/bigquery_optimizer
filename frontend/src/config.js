@@ -5,8 +5,13 @@
 
 const config = {
   // API URLs - these are set during build time via Vite env variables
-  agentApiUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-  backendApiUrl: import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001',
+  // Check if we're using proxy paths or direct URLs
+  agentApiUrl: import.meta.env.VITE_API_URL?.startsWith('/api/') 
+    ? 'https://bigquery-optimizer-agent-api-978412153928.us-central1.run.app'
+    : (import.meta.env.VITE_API_URL || 'http://localhost:8000'),
+  backendApiUrl: import.meta.env.VITE_BACKEND_API_URL?.startsWith('/api/') 
+    ? 'https://bigquery-optimizer-backend-api-978412153928.us-central1.run.app'
+    : (import.meta.env.VITE_BACKEND_API_URL || import.meta.env.VITE_BQ_API_URL || 'http://localhost:8001'),
   
   // Google Cloud Configuration (passed from backend)
   gcpProjectId: import.meta.env.VITE_GCP_PROJECT_ID || '',

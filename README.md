@@ -1,16 +1,17 @@
-# BigQuery Optimizer
+# BigQuery Optimization Engine
 
-AI-powered BigQuery query optimization tool using Google's ADK (Agent Development Kit) and Vertex AI.
+A multi-agent SQL optimization system for analyzing and optimizing BigQuery queries, with support for both BigQuery and Firestore backends.
 
 ## Features
 
 - 🚀 **Real-time Query Optimization** - Analyzes and optimizes BigQuery SQL queries
-- 🤖 **AI-Powered Analysis** - Uses Gemini/Vertex AI for intelligent optimization (required)
+- 🤖 **AI-Powered Analysis** - Uses Gemini/Vertex AI for intelligent optimization
 - 💰 **Cost Estimation** - Calculates potential cost savings
 - 🔍 **Issue Detection** - Identifies common performance issues
+- 📊 **Dual Backend Support** - Choose between Firestore (default) or BigQuery for data storage
+- 🎯 **Multi-Agent Architecture** - Specialized agents for different optimization tasks
 - 📊 **Local Data Storage** - Uses IndexedDB for offline capability
-- 🔐 **Simple Authentication** - Hardcoded auth (upgradeable to Google OAuth)
-- ⚠️ **No Mock Mode** - Requires working Vertex AI connection
+- 🔐 **Authentication Ready** - Configurable for public or private access
 
 ## Architecture
 
@@ -33,881 +34,317 @@ AI-powered BigQuery query optimization tool using Google's ADK (Agent Developmen
 └──────────────────────────────────────────┘
 ```
 
-## Prerequisites
-
-- Node.js 18+
-- Python 3.11+
-- Google Cloud Project with APIs enabled:
-  - BigQuery API
-  - Vertex AI API
-  - Cloud Resource Manager API
-- Application Default Credentials configured
-
-## Quick Start
-
-### 1. Clone and Setup
-
-```bash
-git clone <repository>
-cd bigquery-optimizer
-```
-
-### 2. Configure Google Cloud
-
-```bash
-# Set up Application Default Credentials
-gcloud auth application-default login
-gcloud config set project your-project-id
-
-# Enable required APIs (if not already enabled)
-gcloud services enable aiplatform.googleapis.com
-gcloud services enable bigquery.googleapis.com
-```
-
-### 3. Local Environment Setup
-
-#### Important: Python 3.11+ Required
-
-This project requires Python 3.11 or higher. Check your Python version:
-
-```bash
-python3 --version
-# If you don't have Python 3.11, install it:
-# macOS: brew install python@3.11
-# Ubuntu: sudo apt install python3.11
-```
-
-#### Set up Virtual Environments
-
-**Agent API Setup:**
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/agent_api
-
-# Create virtual environment with Python 3.11
-python3.11 -m venv .venv
-
-# Activate virtual environment
-source .venv/bin/activate
-
-# Upgrade pip and install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-**Backend API Setup:**
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/backend_api
-
-# Create virtual environment with Python 3.11
-python3.11 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Upgrade pip and install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-**Frontend Setup:**
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/frontend
-
-# Install Node dependencies
-npm install
-```
-
-### 4. Start All Services Locally
-
-Run each service in a separate terminal window:
-
-#### Terminal 1 - Agent API (Port 8000)
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/agent_api
-source .venv/bin/activate
-
-# IMPORTANT: Run without 'app' parameter - ADK will auto-discover the app folder
-adk api_server --port 8000 --allow_origins="*"
-```
-
-#### Terminal 2 - Backend API (Port 8001)
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/backend_api
-source venv/bin/activate
-python main_firestore.py
-```
-
-#### Terminal 3 - Frontend (Port 3000)
-```bash
-cd ~/workspace/prototype/bigquery-optimizer/frontend
-export VITE_API_URL="http://localhost:8000"
-export VITE_BACKEND_API_URL="http://localhost:8001"
-npm run dev
-```
-
-#### Alternative: Use Deploy Script
-```bash
-# From project root - runs all services at once
-./deploy.sh local
-# Press Ctrl+C to stop all services
-```
-
-### 5. Access the Application
-
-- **Frontend**: http://localhost:3000 or http://localhost:5173
-- **Backend API**: http://localhost:8000/docs
-- **ADK UI**: http://localhost:8000/app/
-- **BQ API**: http://localhost:8001/docs
-
-**Login Credentials:**
-- Username: `admin`
-- Password: `bigquery123`
-
-## Environment Configuration
-
-### Setting Up Environment Variables
-
-1. **Copy the example environment file:**
-```bash
-cp .env.example .env
-```
-
-2. **Update the `.env` file with your project details:**
-```bash
-# Primary configuration
-export GCP_PROJECT_ID="your-project-id"
-export BQ_PROJECT_ID="${GCP_PROJECT_ID}"  # Can be different from GCP project
-export BQ_DATASET="bq_optimizer"
-export REGION="us-central1"
-```
-
-3. **Source the environment before deployment:**
-```bash
-source .env
-```
-
-## Cloud Deployment Prerequisites
-
-Before deploying to Google Cloud Run, ensure you have completed all prerequisites:
+## 📋 Prerequisites for Deployment
 
 ### 1. Google Cloud Project Setup
 
+#### Required APIs to Enable
+Enable the following APIs in your Google Cloud project:
+
 ```bash
-# Set your project ID
-export GCP_PROJECT_ID="your-project-id"
-gcloud config set project $GCP_PROJECT_ID
+# Core services
+gcloud services enable run.googleapis.com              # Cloud Run
+gcloud services enable cloudbuild.googleapis.com       # Cloud Build
+gcloud services enable appengine.googleapis.com        # App Engine
+gcloud services enable artifactregistry.googleapis.com # Artifact Registry
 
-# Enable required APIs
-gcloud services enable \
-    bigquery.googleapis.com \
-    run.googleapis.com \
-    cloudbuild.googleapis.com \
-    artifactregistry.googleapis.com \
-    compute.googleapis.com \
-    aiplatform.googleapis.com \
-    firestore.googleapis.com
+# Data services  
+gcloud services enable firestore.googleapis.com        # Firestore (default backend)
+gcloud services enable bigquery.googleapis.com         # BigQuery (optional backend)
 
-# Verify billing is enabled
-gcloud beta billing projects describe $GCP_PROJECT_ID
+# AI/ML services
+gcloud services enable aiplatform.googleapis.com       # Vertex AI (for Agent API)
+
+# Support services
+gcloud services enable iam.googleapis.com              # IAM
+gcloud services enable cloudresourcemanager.googleapis.com # Resource Manager
 ```
 
-### 2. Authentication & Permissions
+#### App Engine Initialization
+App Engine must be initialized before deployment:
 
 ```bash
-# Authenticate with Google Cloud
-gcloud auth login
-gcloud auth application-default login
-
-# Verify you have owner/editor role or required permissions
-gcloud projects get-iam-policy $GCP_PROJECT_ID \
-    --flatten="bindings[].members" \
-    --filter="bindings.members:$(gcloud config get-value account)" \
-    --format="value(bindings.role)"
+gcloud app create --region=us-central  # Choose your preferred region
 ```
 
-### 3. BigQuery Dataset Setup
+Available regions:
+- `us-central` (Iowa)
+- `us-east1` (South Carolina)  
+- `us-east4` (Virginia)
+- `europe-west` (Belgium)
+- `europe-west2` (London)
+- `asia-northeast1` (Tokyo)
+
+### 2. Service Account Setup
+
+Create a dedicated service account for the application:
 
 ```bash
-# Create BigQuery dataset for storing analysis results
+# Create service account
+gcloud iam service-accounts create bq-optimizer-sa \
+    --display-name="BigQuery Optimizer Service Account" \
+    --project=YOUR_PROJECT_ID
+
+# Grant necessary roles
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:bq-optimizer-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/datastore.user"  # For Firestore access
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:bq-optimizer-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/bigquery.dataEditor"  # For BigQuery access (if using BigQuery backend)
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:bq-optimizer-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/aiplatform.user"  # For Vertex AI/Gemini access
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:bq-optimizer-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/serviceusage.serviceUsageConsumer"  # For API usage
+```
+
+### 3. Firestore Setup (Default Backend)
+
+Create Firestore database (if not already exists):
+
+```bash
+gcloud firestore databases create \
+    --location=us-central \
+    --project=YOUR_PROJECT_ID
+```
+
+### 4. BigQuery Setup (Optional Backend)
+
+If using BigQuery as backend, create the dataset:
+
+```bash
 bq mk --dataset \
     --location=US \
-    --description="BigQuery Optimizer Analysis Storage" \
-    $GCP_PROJECT_ID:bq_optimizer
-
-# Verify dataset creation
-bq ls --project_id=$GCP_PROJECT_ID
+    --project_id=YOUR_PROJECT_ID \
+    bq_optimizer
 ```
 
-### 4. Firestore Database Initialization
+### 5. Development Tools
 
+#### Required Tools
+- **gcloud CLI**: [Install Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
+- **Python 3.11+**: Required for backend and agent APIs
+- **Node.js 18+**: Required for frontend
+- **npm**: Comes with Node.js
+- **ADK (AI Development Kit)**: For agent API deployment
+
+#### Install ADK
 ```bash
-# Create Firestore database (if not exists)
-gcloud firestore databases create \
-    --location=us-central1 \
-    --project=$GCP_PROJECT_ID
-
-# Verify Firestore is ready
-gcloud firestore databases list --project=$GCP_PROJECT_ID
-```
-
-### 5. Install Required Tools
-
-```bash
-# Install Google ADK for Agent API deployment
 pip install google-adk
-
-# Verify ADK installation
-adk --version
-
-# Ensure Python 3.10+ is installed
-python3 --version
-
-# Ensure Node.js and npm are installed
-node --version
-npm --version
 ```
 
-### 6. Environment Configuration
+### 6. Environment Variables
+
+The deployment script uses the following environment variables (with defaults):
 
 ```bash
-# Create .env file from template
-cp .env.example .env
-
-# Edit .env with your configuration
-cat > .env << EOF
-# Google Cloud Configuration
-export GCP_PROJECT_ID="$GCP_PROJECT_ID"
-export BQ_PROJECT_ID="$GCP_PROJECT_ID"  # Can be different for cross-project analysis
-export BQ_DATASET="bq_optimizer"
-export BQ_LOCATION="US"
-export REGION="us-central1"
-export BACKEND_TYPE="firestore"         # or "bigquery"
-export APP_ENV="production"
-
-# Service Names (optional - has defaults)
-export AGENT_API_SERVICE="bigquery-optimizer-agent-api"
-export BACKEND_API_SERVICE="bigquery-optimizer-backend-api"
-export FRONTEND_SERVICE="bigquery-optimizer-frontend"
-EOF
-
-# Load environment variables
-source .env
+export GCP_PROJECT_ID="your-project-id"     # Required
+export REGION="us-central1"                 # Default: us-central1
+export BACKEND_TYPE="firestore"             # Default: firestore (or "bigquery")
+export BQ_DATASET="bq_optimizer"            # Default: bq_optimizer
+export BQ_LOCATION="US"                     # Default: US
+export APP_ENV="production"                 # Default: production
 ```
 
-### 7. Validate Prerequisites
+## 🚀 Deployment
 
+### Quick Deploy
+
+1. Clone the repository:
 ```bash
-# Run validation script to check all prerequisites
-./validate_deployment.sh
-
-# This script checks:
-# ✅ Environment variables
-# ✅ Required tools (gcloud, ADK, Python, Node.js)
-# ✅ GCP APIs enabled
-# ✅ IAM permissions
-# ✅ BigQuery dataset
-# ✅ Firestore database
-# ✅ Local dependencies
-# ✅ Billing enabled
+git clone <repository-url>
+cd bigquery-optimizer
 ```
 
-## Deployment
-
-### Local Development
-
+2. Set your project ID:
 ```bash
-# Start all services locally (runs in background)
-./deploy.sh local
-
-# Start individual services (runs in foreground with logs)
-./deploy.sh local-agent-api      # Agent API only (port 8000)
-./deploy.sh local-backend-api    # Backend API only (port 8001)  
-./deploy.sh local-frontend       # Frontend only (port 3000)
-```
-
-### Cloud Run Deployment
-
-```bash
-# IMPORTANT: Complete all prerequisites above first!
-
-# Deploy all services to Cloud Run
-./deploy.sh remote
-
-# Deploy individual services
-./deploy.sh remote-agent-api     # Deploy Agent API only
-./deploy.sh remote-backend-api   # Deploy Backend API only
-./deploy.sh remote-frontend      # Deploy Frontend only
-
-# Check deployment status
-./deploy.sh status
-
-# View service logs
-gcloud run services logs read $AGENT_API_SERVICE --region=$REGION
-gcloud run services logs read $BACKEND_API_SERVICE --region=$REGION
-gcloud run services logs read $FRONTEND_SERVICE --region=$REGION
-
-# Destroy all Cloud Run services
-./deploy.sh destroy
-```
-
-### Deployment Order
-
-For first-time deployment, deploy services in this order:
-1. **Agent API** - Core optimization engine with ADK
-2. **Backend API** - Firestore/BigQuery data management
-3. **Frontend** - React web interface
-
-```bash
-# Sequential deployment (recommended for first time)
-./deploy.sh remote-agent-api
-./deploy.sh remote-backend-api
-./deploy.sh remote-frontend
-
-# Or deploy all at once
-./deploy.sh remote
-```
-
-### Deployment to Different Projects
-
-```bash
-# Option 1: Export environment variables
-export GCP_PROJECT_ID="my-project-id"
-export BQ_DATASET="my_dataset"
-./deploy.sh remote
-
-# Option 2: Inline environment variables
-GCP_PROJECT_ID="my-project-id" ./deploy.sh remote
-
-# Option 3: Use environment file
-source .env.production
-./deploy.sh remote
-```
-
-## Troubleshooting Deployment
-
-### Common Issues and Solutions
-
-#### 1. ADK Deployment Fails with "No root_agent found"
-```bash
-# Error: No root_agent found for 'app'
-# Solution: Ensure you're deploying from within agent_api folder
-cd agent_api
-adk deploy cloud_run --project=$PROJECT_ID --region=$REGION \
-    --service_name=$SERVICE_NAME --allow_origins="*" --with_ui app
-```
-
-#### 2. "exec format error" on Cloud Run (M1/M2 Macs)
-```bash
-# Error: exec format error when deploying from ARM64 Macs
-# Solution: ADK handles cross-platform builds automatically
-# Ensure you're using the latest ADK version
-pip install --upgrade google-adk
-```
-
-#### 3. APIs Not Enabled
-```bash
-# Error: API [service.googleapis.com] not enabled
-# Solution: Enable all required APIs
-gcloud services enable bigquery.googleapis.com run.googleapis.com \
-    cloudbuild.googleapis.com artifactregistry.googleapis.com \
-    compute.googleapis.com aiplatform.googleapis.com firestore.googleapis.com
-```
-
-#### 4. Permission Denied Errors
-```bash
-# Error: Permission denied on BigQuery/Firestore operations
-# Solution: Ensure proper IAM roles
-gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
-    --member="user:$(gcloud config get-value account)" \
-    --role="roles/owner"
-```
-
-#### 5. Virtual Environment Issues
-```bash
-# Error: Virtual environment not found
-# Solution: Create venv in each service directory
-cd agent_api && python3.11 -m venv .venv && source .venv/bin/activate
-cd ../backend_api && python3.11 -m venv venv && source venv/bin/activate
-```
-
-#### 6. Port Already in Use (Local Development)
-```bash
-# Error: Port 8000/8001/3000 already in use
-# Solution: Kill existing processes
-lsof -ti:8000 | xargs kill -9  # Kill process on port 8000
-lsof -ti:8001 | xargs kill -9  # Kill process on port 8001
-lsof -ti:3000 | xargs kill -9  # Kill process on port 3000
-```
-
-#### 7. Firestore Not Initialized
-```bash
-# Error: Firestore database not found
-# Solution: Create Firestore database
-gcloud firestore databases create --location=us-central1
-```
-
-#### 8. Environment Variables Not Set
-```bash
-# Error: GCP_PROJECT_ID not set
-# Solution: Source the .env file
-source .env
-# Or set directly
 export GCP_PROJECT_ID="your-project-id"
 ```
 
-### Verify Deployment
+3. Run the deployment script:
+```bash
+./deploy-production.sh
+```
 
-After deployment, verify all services are running:
+The script will:
+- Check all prerequisites
+- Deploy Agent API (with ADK)
+- Deploy Backend API (Cloud Run)
+- Deploy Frontend (App Engine)
+- Configure CORS and authentication
+- Make APIs publicly accessible
+
+### Manual Deployment
+
+If you prefer to deploy components individually:
+
+#### Agent API
+```bash
+cd agent_api
+adk deploy cloud_run \
+    --project=YOUR_PROJECT_ID \
+    --region=us-central1 \
+    --service_name=bigquery-optimizer-agent-api \
+    --allow_origins="*" \
+    --with_ui \
+    app
+
+# Make publicly accessible
+gcloud run services add-iam-policy-binding bigquery-optimizer-agent-api \
+    --member="allUsers" \
+    --role="roles/run.invoker" \
+    --region=us-central1
+```
+
+#### Backend API
+```bash
+cd backend_api
+gcloud run deploy bigquery-optimizer-backend-api \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars="BACKEND_TYPE=firestore,GCP_PROJECT_ID=YOUR_PROJECT_ID"
+```
+
+#### Frontend
+```bash
+cd frontend
+npm install
+npm run build
+gcloud app deploy app.yaml --project=YOUR_PROJECT_ID
+```
+
+## 📁 Project Structure
+
+```
+bigquery-optimizer/
+├── agent_api/          # ADK-based agent for query optimization
+│   ├── app.py         # Main agent application
+│   ├── config.json    # Agent configuration
+│   └── requirements.txt
+├── backend_api/        # Backend API service
+│   ├── main_firestore.py  # Firestore backend
+│   ├── main_bigquery.py   # BigQuery backend
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/           # React frontend
+│   ├── src/
+│   ├── package.json
+│   ├── app.yaml       # App Engine configuration
+│   └── vite.config.js
+└── deploy-production.sh  # Main deployment script
+```
+
+## 🔧 Configuration
+
+### Switching Backends
+
+To switch between Firestore (default) and BigQuery:
 
 ```bash
-# Check service status
-./deploy.sh status
+# For Firestore (default)
+export BACKEND_TYPE="firestore"
 
-# Test each service endpoint
-curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-agent-api --region=us-central1 --format="value(status.url)")/docs
-curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-backend-api --region=us-central1 --format="value(status.url)")/health
-curl -s -o /dev/null -w "%{http_code}" $(gcloud run services describe bigquery-optimizer-frontend --region=us-central1 --format="value(status.url)")
-
-# View logs if issues occur
-gcloud run services logs read bigquery-optimizer-agent-api --region=us-central1 --limit=50
-gcloud run services logs read bigquery-optimizer-backend-api --region=us-central1 --limit=50
-gcloud run services logs read bigquery-optimizer-frontend --region=us-central1 --limit=50
-```
-
-## Required Permissions
-
-### Google Cloud IAM Permissions
-
-Each service requires specific permissions to function properly. Create a service account with the following roles:
-
-#### 1. Agent API (ADK Service) Permissions
-
-**Required Roles:**
-- `roles/aiplatform.user` - Use Vertex AI models
-- `roles/bigquery.dataViewer` - Read BigQuery metadata
-- `roles/bigquery.jobUser` - Run BigQuery dry runs and queries
-- `roles/bigquery.dataEditor` - Write to bq_optimizer tables
-
-**Specific Permissions:**
-```
-aiplatform.endpoints.predict
-bigquery.datasets.get
-bigquery.tables.get
-bigquery.tables.list
-bigquery.tables.getData
-bigquery.tables.create
-bigquery.tables.updateData
-bigquery.jobs.create
-```
-
-#### 2. Backend API Permissions
-
-**Required Roles:**
-- `roles/bigquery.admin` - Full BigQuery access for optimization operations
-- `roles/logging.logWriter` - Write application logs
-
-**Specific Permissions:**
-```
-bigquery.datasets.create
-bigquery.datasets.get
-bigquery.datasets.update
-bigquery.tables.*
-bigquery.jobs.*
-bigquery.routines.list
-bigquery.routines.get
-resourcemanager.projects.get
-```
-
-#### 3. Frontend Permissions
-
-The frontend runs in the browser and doesn't need GCP permissions directly. It communicates with the backend services using their APIs.
-
-### BigQuery Dataset Permissions
-
-Ensure the `bq_optimizer` dataset exists with proper permissions:
-
-```bash
-# Create dataset
-bq mk --dataset --location=US ${GCP_PROJECT_ID}:bq_optimizer
-
-# Grant permissions to service account
-bq add-iam-policy-binding \
-  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@PROJECT.iam.gserviceaccount.com" \
-  --role="roles/bigquery.dataEditor" \
-  ${GCP_PROJECT_ID}:bq_optimizer
-```
-
-### Required BigQuery Tables
-
-The following tables will be created automatically:
-
-- `bq_optimizer.query_templates` - Stores query patterns
-- `bq_optimizer.projects` - Project configurations
-- `bq_optimizer.analyses` - Analysis results
-- `bq_optimizer.table_analysis` - Table optimization data
-- `bq_optimizer.bq_anti_pattern_rules` - Optimization rules
-
-### API Enablement
-
-Enable these APIs in your Google Cloud project:
-
-```bash
-gcloud services enable \
-  bigquery.googleapis.com \
-  aiplatform.googleapis.com \
-  cloudresourcemanager.googleapis.com \
-  cloudbuild.googleapis.com \
-  run.googleapis.com \
-  artifactregistry.googleapis.com
-```
-
-### Service Account Setup
-
-1. **Create a service account:**
-```bash
-gcloud iam service-accounts create bigquery-optimizer \
-  --display-name="BigQuery Optimizer Service Account"
-```
-
-2. **Grant necessary roles:**
-```bash
-# For Agent API
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:bigquery-optimizer@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/aiplatform.user"
-
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:bigquery-optimizer@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/bigquery.jobUser"
-
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:bigquery-optimizer@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/bigquery.dataViewer"
-
-# For Backend API
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:bigquery-optimizer@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/bigquery.admin"
-```
-
-3. **Download service account key (for local development):**
-```bash
-gcloud iam service-accounts keys create service-account.json \
-  --iam-account=bigquery-optimizer@${GCP_PROJECT_ID}.iam.gserviceaccount.com
-
-# Set environment variable
-export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
-```
-
-### Cloud Run Service Account
-
-When deploying to Cloud Run, the services use the default Compute Engine service account. Grant it necessary permissions:
-
-```bash
-# Get the default service account
-PROJECT_NUMBER=$(gcloud projects describe ${GCP_PROJECT_ID} --format='value(projectNumber)')
-DEFAULT_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-
-# Grant permissions
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:${DEFAULT_SA}" \
-  --role="roles/bigquery.admin"
-
-gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \
-  --member="serviceAccount:${DEFAULT_SA}" \
-  --role="roles/aiplatform.user"
+# For BigQuery
+export BACKEND_TYPE="bigquery"
 ```
 
 ### CORS Configuration
 
-For production deployments, update CORS settings:
+CORS is automatically configured during deployment. To modify allowed origins:
 
 ```bash
-# In .env or deployment script
-export CORS_ORIGINS="https://your-frontend-domain.com,https://backup-domain.com"
+gcloud run services update bigquery-optimizer-backend-api \
+    --update-env-vars="CORS_ORIGINS=https://your-domain.com" \
+    --region=us-central1
 ```
 
-### Production URLs (Example)
+## 🔐 Security Notes
 
-After deployment, your services will be available at:
+The current deployment makes all services publicly accessible. For production environments, consider:
 
-- **Frontend**: `https://bigquery-optimizer-frontend-xxxxx-uc.a.run.app`
-- **Agent API**: `https://bigquery-optimizer-agent-api-xxxxx-uc.a.run.app`
-- **Backend API**: `https://bigquery-optimizer-backend-api-xxxxx-uc.a.run.app`
-- **ADK UI**: `https://bigquery-optimizer-agent-api-xxxxx-uc.a.run.app/app/`
+1. **Enable Authentication**: Remove `--allow-unauthenticated` flags
+2. **Use Service Accounts**: Configure service-to-service authentication
+3. **Implement IAP**: Use Identity-Aware Proxy for frontend access
+4. **Restrict CORS**: Limit to specific domains instead of "*"
 
-## Manual Setup
+## 🧹 Cleanup
 
-### Backend Setup
+To remove all deployed resources:
 
 ```bash
-cd backend
-
-# Install uv package manager
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
-
-# Install dependencies
-uv sync
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your project details
-
-# Run ADK server
-uv run adk api_server app --port 8000
+./deploy-production.sh --cleanup
 ```
 
-### Frontend Setup
+This will:
+- Delete Cloud Run services
+- Remove App Engine versions
+- Clean up Firestore data (optional)
+- Delete BigQuery dataset (optional)
+
+## 📝 Troubleshooting
+
+### Common Issues
+
+1. **Permission Denied on Vertex AI**
+   - Ensure the service account has `roles/aiplatform.user` role
+   - Wait 2-3 minutes for IAM changes to propagate
+   - Restart the service: `gcloud run services update bigquery-optimizer-agent-api --region=us-central1`
+
+2. **Firestore Permission Issues**
+   - Verify Firestore is initialized in your project
+   - Check service account has `roles/datastore.user` role
+   - Ensure `BACKEND_TYPE=firestore` is set
+
+3. **App Engine Not Found**
+   - Initialize App Engine: `gcloud app create --region=us-central`
+   - Check if App Engine API is enabled
+
+4. **ADK Command Not Found**
+   - Install ADK: `pip install google-adk`
+   - Verify installation: `adk --version`
+
+5. **Cloud Build Fails**
+   - Check if Cloud Build API is enabled
+   - Verify Docker/Containerfile in backend_api directory
+   - Check build logs: `gcloud builds list --limit=5`
+
+### Logs
+
+View logs for debugging:
 
 ```bash
-cd frontend
+# Agent API logs
+gcloud run logs read bigquery-optimizer-agent-api --region=us-central1
 
-# Install dependencies
-npm install
+# Backend API logs
+gcloud run logs read bigquery-optimizer-backend-api --region=us-central1
 
-# Start development server
-npm run dev
+# Frontend logs
+gcloud app logs read --service=default
 ```
 
-## Testing
+## 📊 Monitoring
 
-### Test BigQuery Connection
+Access service URLs:
+- **Frontend**: `https://YOUR_PROJECT_ID.uc.r.appspot.com`
+- **Backend API**: `https://bigquery-optimizer-backend-api-*.run.app/docs`
+- **Agent API**: `https://bigquery-optimizer-agent-api-*.run.app/app/`
 
-```bash
-# List datasets
-bq ls
+## 🤝 Support
 
-# Test query
-bq query --use_legacy_sql=false 'SELECT 1 as test'
-```
+For issues or questions:
+1. Check the troubleshooting section
+2. Review Cloud Run and App Engine logs
+3. Ensure all prerequisites are met
+4. Verify IAM permissions are correctly configured
 
-### Test with Sample Queries
-
-Try these queries in the app:
-
-```sql
--- Simple query with issues
-SELECT * FROM analytics.events
-
--- Public dataset query
-SELECT * 
-FROM `bigquery-public-data.samples.shakespeare` 
-WHERE word_count > 100
-
--- Complex query for optimization
-SELECT 
-  user_id,
-  COUNT(*) as event_count,
-  MAX(timestamp) as last_seen
-FROM analytics.events
-GROUP BY user_id
-ORDER BY event_count DESC
-```
-
-## Project Structure
-
-```
-bigquery-optimizer/
-├── frontend/                 # React frontend
-│   ├── src/
-│   │   ├── pages/           # Main app pages
-│   │   ├── components/      # Reusable components
-│   │   ├── services/        # API and data services
-│   │   │   ├── database.js  # IndexedDB with Dexie
-│   │   │   └── adk.js       # ADK backend integration
-│   │   └── contexts/        # React contexts
-│   └── package.json
-│
-├── backend/                  # ADK backend
-│   ├── app/
-│   │   ├── agent.py         # Main optimization agent
-│   │   ├── config.py        # Configuration
-│   │   └── tools/           # BigQuery tools
-│   ├── pyproject.toml       # Python dependencies
-│   └── .env                 # Environment config
-│
-└── start.sh                 # Startup script
-```
-
-## Configuration
-
-### Backend (.env)
-
-```env
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_GENAI_USE_VERTEXAI=True
-BIGQUERY_DATASET=analytics
-BIGQUERY_LOCATION=US
-ADK_PORT=8000
-```
-
-### Frontend
-
-The frontend automatically connects to:
-- Backend at `http://localhost:8000`
-- Shows clear error messages if backend or Vertex AI is unavailable
-
-## Features in Detail
-
-### Query Optimization
-
-The optimizer checks for:
-- SELECT * usage (recommends specific columns)
-- Missing partition filters
-- Inefficient JOINs
-- Missing LIMIT with ORDER BY
-- Subqueries that could be CTEs
-- Non-sargable WHERE clauses
-
-### Cost Estimation
-
-- Uses BigQuery dry-run API for accurate cost estimates
-- Calculates bytes processed and estimated costs
-- Shows percentage savings between original and optimized queries
-
-### Local Storage
-
-- All analyses saved to IndexedDB
-- Works offline with cached data
-- Automatic sync when online
-
-## Development
-
-### Adding New Optimization Rules
-
-Edit `backend/app/agent.py` and add rules to the optimization prompt:
-
-```python
-# Add new optimization checks in the prompt
-"9. Your new optimization rule here"
-```
-
-### Customizing Frontend
-
-- Edit components in `frontend/src/pages/`
-- Modify theme in `frontend/src/index.css`
-- Add new routes in `frontend/src/App.jsx`
-
-## Troubleshooting
-
-### Common Setup Issues
-
-#### Dependency Conflicts
-If you encounter dependency conflicts during installation:
-
-```bash
-# Clean install in virtual environment
-rm -rf .venv venv
-python3.11 -m venv .venv  # or venv for backend_api
-source .venv/bin/activate  # or venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-#### Virtual Environment Not Activated
-Always verify you're in the virtual environment before installing packages:
-
-```bash
-# Check if virtual environment is active
-which python
-# Should show: /path/to/your/project/.venv/bin/python
-
-# If not, activate it:
-source .venv/bin/activate  # or venv/bin/activate for backend_api
-```
-
-#### Port Already in Use
-If ports are already in use:
-
-```bash
-# Kill services on specific ports
-lsof -ti:8000,8001,3000 | xargs kill -9 2>/dev/null
-```
-
-### Backend won't start
-
-```bash
-# Check if ADC is configured
-gcloud auth application-default login
-
-# Verify project
-gcloud config get-value project
-```
-
-### "Vertex AI not available" error
-
-This is a critical error - the system requires Vertex AI to function.
-
-```bash
-# Enable Vertex AI API
-gcloud services enable aiplatform.googleapis.com
-
-# Verify it's enabled
-gcloud services list --enabled | grep aiplatform
-
-# Check if you have proper permissions
-gcloud projects get-iam-policy $(gcloud config get-value project)
-```
-
-**Note:** There is no fallback mode. Vertex AI must be configured and working.
-
-### BigQuery connection issues
-
-```bash
-# Test BigQuery access
-bq ls
-
-# Check permissions
-gcloud projects get-iam-policy your-project-id
-```
-
-## Production Deployment
-
-### Backend (Cloud Run)
-
-```bash
-# Build and deploy
-gcloud run deploy bigquery-optimizer-backend \
-  --source backend \
-  --port 8000 \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-### Frontend (Firebase Hosting)
-
-```bash
-cd frontend
-npm run build
-firebase deploy --only hosting
-```
-
-## Roadmap
-
-- [ ] Google OAuth integration
-- [ ] Real-time collaboration
-- [ ] Query history and versioning
-- [ ] Custom optimization rules UI
-- [ ] Export optimization reports
-- [ ] Scheduled query analysis
-- [ ] Team workspaces
-
-## License
+## 📄 License
 
 MIT
-
-## Support
-
-For issues and questions:
-- GitHub Issues: [Create an issue](https://github.com/your-repo/issues)
-- Documentation: [ADK Documentation](https://cloud.google.com/agent-development-kit/docs)
-
-## Credits
-
-Built with:
-- [Google ADK](https://cloud.google.com/agent-development-kit)
-- [Vertex AI](https://cloud.google.com/vertex-ai)
-- [BigQuery](https://cloud.google.com/bigquery)
-- [React](https://react.dev)
-- [Vite](https://vitejs.dev)

@@ -33,7 +33,7 @@ class FirestoreService:
                     self.db = firestore.Client(
                         credentials=credentials,
                         project=config.FIRESTORE_PROJECT_ID,
-                        database=config.FIRESTORE_DATABASE or 'bq-optimization'
+                        database=config.FIRESTORE_DATABASE  # Use default if not specified
                     )
                     logger.info("✅ Firestore client initialized with service account")
                 except Exception as e:
@@ -49,7 +49,7 @@ class FirestoreService:
                     
                     self.db = firestore.Client(
                         project=config.FIRESTORE_PROJECT_ID,
-                        database=config.FIRESTORE_DATABASE or 'bq-optimization'
+                        database=config.FIRESTORE_DATABASE  # Use default if not specified
                     )
                     logger.info("✅ Firestore client initialized with default credentials")
                 except Exception as e:

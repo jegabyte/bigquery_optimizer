@@ -1,0 +1,17 @@
+BigQuery Optimizer Secure Deployment Info
+Generated: Fri Aug 22 20:34:31 +08 2025
+
+Project: aiva-e74f3
+Region: us-central1
+Service Account: bq-optimizer-sa@aiva-e74f3.iam.gserviceaccount.com
+Backend: firestore
+
+Frontend URL (PUBLIC): https://aiva-e74f3.uc.r.appspot.com
+Agent API URL (SECURED): https://bigquery-optimizer-agent-api-puql6kbaxq-uc.a.run.app
+Backend API URL (SECURED): https://bigquery-optimizer-backend-api-puql6kbaxq-uc.a.run.app
+
+Security Configuration:
+- Backend and Agent APIs require authentication
+- Frontend uses service account for API access
+- Inter-service communication is secured
+- Direct API access is blocked

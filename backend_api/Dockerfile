@@ -19,8 +19,8 @@ ENV APP_ENV="production"
 # Expose port
 EXPOSE 8001
 
-# Default to BigQuery backend (can be overridden with BACKEND_TYPE env var)
-ENV BACKEND_TYPE="bigquery"
+# Default to Firestore backend (can be overridden with BACKEND_TYPE env var)
+ENV BACKEND_TYPE="firestore"
 
 # Create a startup script that selects the right main file based on BACKEND_TYPE
 RUN echo '#!/bin/sh\n\

@@ -1,0 +1,24 @@
+runtime: nodejs20
+
+handlers:
+- url: /
+  static_files: dist/index.html
+  upload: dist/index.html
+
+- url: /assets
+  static_dir: dist/assets
+  
+- url: /.*
+  static_files: dist/index.html
+  upload: dist/index.html
+
+env_variables:
+  NODE_ENV: 'production'
+  AGENT_API_URL: 'https://bigquery-optimizer-agent-api-puql6kbaxq-uc.a.run.app'
+  BACKEND_API_URL: 'https://bigquery-optimizer-backend-api-puql6kbaxq-uc.a.run.app'
+  GCP_PROJECT_ID: 'aiva-e74f3'
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+  target_cpu_utilization: 0.6
