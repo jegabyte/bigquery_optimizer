@@ -1602,9 +1602,38 @@ const AnalysisResult = () => {
               }}
             />
           </div>
-          <div className="mt-2 flex justify-end items-center">
-            <span className="text-sm text-green-600 font-medium">✓ Optimized for better performance</span>
-          </div>
+          
+          {/* High-level metrics for optimized query */}
+          {getStageData('optimization') && getStageData('optimization').performance_improvement && (
+            <div className="mt-4 bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200 rounded-lg p-4">
+              <div className="grid grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-600">
+                    {getStageData('optimization').performance_improvement.percentage_reduction || 0}%
+                  </div>
+                  <div className="text-sm text-gray-600">Expected Cost Reduction</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">
+                    {getStageData('optimization').performance_improvement.bytes_saved_formatted || '0 B'}
+                  </div>
+                  <div className="text-sm text-gray-600">Data Saved</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-purple-600">
+                    ${(getStageData('optimization').performance_improvement.cost_saved_usd || 0).toFixed(4)}
+                  </div>
+                  <div className="text-sm text-gray-600">Expected Cost Saving</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-600">
+                    {getStageData('optimization').total_optimizations || 0}
+                  </div>
+                  <div className="text-sm text-gray-600">Optimizations Applied</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
