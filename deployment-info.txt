@@ -1,5 +1,5 @@
 BigQuery Optimizer Deployment Info
-Generated: Sat Aug 23 12:22:11 +08 2025
+Generated: Sat Aug 23 17:10:39 +08 2025
 
 Project: aiva-e74f3
 Region: us-central1

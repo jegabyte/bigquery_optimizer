@@ -175,13 +175,13 @@ const Projects = () => {
     }
   };
 
-  // Calculate totals
-  const totals = projects.reduce((acc, project) => ({
-    templates: acc.templates + project.stats.templatesDiscovered,
-    runs: acc.runs + project.stats.totalRuns,
-    spend: acc.spend + project.stats.estimatedMonthlySpend,
-    savings: acc.savings + project.stats.potentialSavings
-  }), { templates: 0, runs: 0, spend: 0, savings: 0 });
+  // Calculate totals (keeping for potential future use)
+  // const totals = projects.reduce((acc, project) => ({
+  //   templates: acc.templates + project.stats.templatesDiscovered,
+  //   runs: acc.runs + project.stats.totalRuns,
+  //   spend: acc.spend + project.stats.estimatedMonthlySpend,
+  //   savings: acc.savings + project.stats.potentialSavings
+  // }), { templates: 0, runs: 0, spend: 0, savings: 0 });
 
   // If a project is selected, show the detailed view
   if (selectedProject) {
@@ -202,14 +202,14 @@ const Projects = () => {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
 
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                 Project Analysis
               </h1>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 Analyze all queries in the project using INFORMATION_SCHEMA.JOBS_BY_PROJECT
               </p>
             </div>
@@ -226,16 +226,16 @@ const Projects = () => {
                     setIsRefreshing(false);
                   }
                 }}
-                className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-1.5"
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 flex items-center space-x-2"
               >
-                <FiRefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <FiRefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
                 <span>Refresh All</span>
               </button>
               <button
                 onClick={() => setIsOnboardingOpen(true)}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-1.5"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
               >
-                <FiPlus className="h-4 w-4" />
+                <FiPlus className="h-5 w-5" />
                 <span>Add Project</span>
               </button>
             </div>
@@ -243,113 +243,10 @@ const Projects = () => {
         </div>
       </div>
 
-      {/* Summary Stats */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="grid grid-cols-4 gap-3">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Query Templates
-                </p>
-                {isLoading ? (
-                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
-                ) : (
-                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                    {totals.templates.toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                <FiActivity className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Total Runs
-                </p>
-                {isLoading ? (
-                  <div className="h-7 w-20 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
-                ) : (
-                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                    {totals.runs.toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
-                <FiBarChart2 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Monthly Spend
-                </p>
-                {isLoading ? (
-                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
-                ) : (
-                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                    {formatCost(totals.spend)}
-                  </p>
-                )}
-              </div>
-              <div className="p-2 bg-red-50 dark:bg-red-950/30 rounded-lg">
-                <FiDollarSign className="h-5 w-5 text-red-600 dark:text-red-400" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Potential Savings
-                </p>
-                {isLoading ? (
-                  <div className="h-7 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
-                ) : (
-                  <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-                    {formatCost(totals.savings)}
-                  </p>
-                )}
-              </div>
-              <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
-                <FiCheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      </div>
 
       {/* Projects Grid */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
-        <div className="mb-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mb-4">
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
             Analyzed Projects ({projects.length})
           </h2>

@@ -5,6 +5,7 @@ Handles streaming output to frontend via SSE with enhanced logging
 
 import json
 import logging
+import time
 from datetime import datetime
 from google.adk.agents.callback_context import CallbackContext
 
@@ -17,22 +18,36 @@ logger = logging.getLogger(__name__)
 
 from app.tracing import add_trace_event, set_trace_attribute
 
+# Global dictionary to track agent start times
+agent_start_times = {}
+
 def create_streaming_callback(agent_name: str, stage_message: str, output_key: str):
     """Creates a streaming callback for a specific agent with enhanced logging and tracing"""
+    
+    # Record start time when callback is created (agent starts)
+    agent_start_times[agent_name] = time.time()
+    
     def callback(callback_context: CallbackContext) -> None:
         """Streams output immediately after agent completes with detailed logging"""
         session = callback_context._invocation_context.session
+        
+        # Calculate execution time
+        end_time = time.time()
+        start_time = agent_start_times.get(agent_name, end_time)
+        execution_time = round(end_time - start_time, 2)
         
         # Add trace event for stage completion
         add_trace_event(f"Stage completed: {agent_name}", {
             "stage.name": agent_name,
             "stage.message": stage_message,
-            "stage.output_key": output_key
+            "stage.output_key": output_key,
+            "execution_time": execution_time
         })
         
         # Enhanced logging for debugging
         logger.info(f"=" * 60)
         logger.info(f"📍 CALLBACK TRIGGERED: {agent_name}")
+        logger.info(f"⏱️ Execution time: {execution_time}s")
         logger.info(f"=" * 60)
         
         # Log session state keys
@@ -46,7 +61,8 @@ def create_streaming_callback(agent_name: str, stage_message: str, output_key: s
             "stage": agent_name,
             "timestamp": datetime.now().isoformat(),
             "status": "completed",
-            "message": stage_message
+            "message": stage_message,
+            "execution_time": execution_time
         }
         
         # Get the output from the session state
@@ -79,6 +95,9 @@ def create_streaming_callback(agent_name: str, stage_message: str, output_key: s
                 try:
                     # Try to parse as JSON
                     data = json.loads(output_text)
+                    # Add execution time to the data
+                    if isinstance(data, dict):
+                        data['execution_time'] = execution_time
                     # Update session state with clean JSON
                     session.state[output_key] = data  # Store as dict, not string
                     stage_output["data"] = data  # Add parsed data to stage output

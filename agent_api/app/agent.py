@@ -280,10 +280,13 @@ Use the metadata from metadata_output to provide specific, quantified impacts.
 query_optimizer = LlmAgent(
     name="query_optimizer",
     model="gemini-2.5-flash",
-    description="Applies optimizations step by step with validation",
+    description="Creates a single optimized query fixing all violations and improving performance",
     tools=[dry_run_tool],  # Add dry_run tool for query validation
     instruction=f"""
-    You are the Query Optimization Agent. Fix violations and optimize the query with ACTUAL validation.
+    You are the Query Optimization Agent. Your job is to produce a SINGLE optimized query that:
+    1. Fixes all anti-pattern violations identified
+    2. Maintains the exact same business logic and results as the original query
+    3. Optimizes for cost and performance
     
     You will receive:
     1. The original SQL query
@@ -293,11 +296,20 @@ query_optimizer = LlmAgent(
     IMPORTANT: Use the bigquery_dry_run tool to validate queries and get ACTUAL cost estimates.
     
     Follow this process:
-    1. First, run dry_run on the ORIGINAL query to get baseline metrics
-    2. Parse the rules_output to understand what violations need to be fixed
-    3. Apply optimizations step by step
-    4. After EACH optimization, run dry_run to validate and get actual metrics
+    1. Run dry_run on the ORIGINAL query to get baseline metrics
+    2. Analyze all violations from rules_output
+    3. Create a SINGLE optimized query that addresses ALL issues at once
+    4. Run dry_run on the optimized query to validate and get actual metrics
     5. Compare actual bytes_processed between original and optimized
+    
+    Apply these optimizations where applicable:
+    - Replace SELECT * with specific columns needed
+    - Add partition filters if table is partitioned
+    - Add clustering filters if table is clustered
+    - Use appropriate JOIN types and conditions
+    - Eliminate subquery anti-patterns
+    - Add LIMIT if appropriate
+    - Fix any other violations identified
     
     When calling bigquery_dry_run:
     - Pass the query as the first parameter
@@ -307,135 +319,161 @@ query_optimizer = LlmAgent(
     Your response must be ONLY valid JSON in this exact format:
     {{
         "original_query": "SELECT * FROM table",
-        "original_validation": {{
+        "original_metrics": {{
             "bytes_processed": 5000000000,
             "bytes_formatted": "5.00 GB",
             "estimated_cost_usd": 0.025,
             "valid": true
         }},
-        "total_optimizations": 3,
-        "steps": [
-            {{
-                "step": 1,
-                "optimization": "Replace SELECT * with specific columns",
-                "query_after": "SELECT id, timestamp, user_id FROM table",
-                "validation": {{
-                    "bytes_processed": 3000000000,
-                    "bytes_formatted": "3.00 GB",
-                    "estimated_cost_usd": 0.015,
-                    "valid": true
-                }},
-                "actual_improvement": {{
-                    "bytes_saved": 2000000000,
-                    "bytes_saved_formatted": "2.00 GB",
-                    "cost_saved_usd": 0.010,
-                    "percentage_reduction": 40
-                }}
-            }},
-            {{
-                "step": 2,
-                "optimization": "Add partition filter",
-                "query_after": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= '2024-01-01'",
-                "validation": {{
-                    "bytes_processed": 100000000,
-                    "bytes_formatted": "100.00 MB",
-                    "estimated_cost_usd": 0.0005,
-                    "valid": true
-                }},
-                "actual_improvement": {{
-                    "bytes_saved": 4900000000,
-                    "bytes_saved_formatted": "4.90 GB",
-                    "cost_saved_usd": 0.0245,
-                    "percentage_reduction": 98
-                }}
-            }}
-        ],
-        "final_query": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= '2024-01-01'",
-        "final_validation": {{
+        "optimized_query": "SELECT id, timestamp, user_id FROM table WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY) LIMIT 10000",
+        "optimized_metrics": {{
             "bytes_processed": 100000000,
             "bytes_formatted": "100.00 MB",
             "estimated_cost_usd": 0.0005,
             "valid": true
         }},
-        "total_actual_savings": {{
+        "optimizations_applied": [
+            "Replaced SELECT * with specific columns (id, timestamp, user_id)",
+            "Added partition filter on timestamp column for last 30 days",
+            "Added LIMIT clause to reduce data scanned"
+        ],
+        "total_optimizations": 3,
+        "performance_improvement": {{
             "bytes_saved": 4900000000,
             "bytes_saved_formatted": "4.90 GB",
             "cost_saved_usd": 0.0245,
             "percentage_reduction": 98
         }},
-        "summary": "Query validated and optimized: 5.00 GB → 100.00 MB (98% reduction, $0.0245 saved)"
+        "summary": "Query optimized from 5.00 GB to 100.00 MB (98% reduction, $0.0245 saved)"
     }}
     
-    CRITICAL: Output ONLY the JSON. No markdown, no explanations, no text before or after.
-    Show realistic, incremental improvements based on the violations found.
+    CRITICAL: 
+    - Output ONLY the JSON. No markdown, no explanations, no text before or after.
+    - The optimized_query must be a SINGLE, complete SQL query that incorporates ALL optimizations
+    - The query must maintain the same business logic as the original
     """,
     output_key="optimization_output",
     after_agent_callback=create_streaming_callback("query_optimizer", "Query optimization completed", "optimization_output")
 )
 
-# 4. Final Reporter Agent
-final_reporter = LlmAgent(
-    name="final_reporter",
+# 4. Query Validation Agent - Validates optimized query against original
+query_validation_agent = LlmAgent(
+    name="query_validation_agent",
     model="gemini-2.5-flash",
-    description="Creates comprehensive final report",
+    description="Validates optimized query structure and schema against original",
+    tools=[dry_run_tool],  # Use dry_run tool to validate both queries
     instruction="""
-    You are the Final Report Generator for BigQuery optimization.
+    You are the Query Validation Agent that ensures the optimized query maintains semantic equivalence with the original.
     
-    You will receive outputs from all previous stages:
-    1. "metadata_output" - Table metadata
-    2. "rules_output" - Rule violations and compliance
-    3. "optimization_output" - Step-by-step optimizations
+    You will receive:
+    1. The original SQL query (from user input)
+    2. "metadata_output" - Table metadata from metadata_extractor
+    3. "rules_output" - Rule violations and compliance
+    4. "optimization_output" - The optimized query and optimization steps
     
-    Create a comprehensive executive summary that includes:
-    - High-level performance improvements
-    - Cost reduction estimates
-    - Compliance improvements
-    - Key recommendations
+    Your task is to validate that the optimized query:
+    1. Returns the same schema (column names, types, order) as the original
+    2. Uses the same join conditions (validate join keys are identical)
+    3. Applies the same filters (WHERE conditions are logically equivalent)
+    4. Groups by the same columns (if applicable)
+    5. Orders results the same way (if applicable)
+    
+    Validation Steps:
+    1. Use the dry_run tool to validate BOTH queries and get their schemas
+    2. Compare the schemas to ensure they match
+    3. Extract and compare join conditions
+    4. Verify filter conditions are equivalent
+    5. Check aggregations and groupings match
     
     Your response must be ONLY valid JSON in this exact format:
     {
-        "executive_summary": {
-            "original_complexity": "low|medium|high",
-            "optimized_complexity": "low|medium|high",
-            "cost_reduction": "XX%",
-            "performance_gain": "XX% faster or YYms improvement",
-            "data_reduction": "XX GB saved"
+        "validation_status": "PASSED|FAILED|WARNING",
+        "validation_timestamp": "ISO8601 timestamp",
+        "schema_validation": {
+            "status": "MATCH|MISMATCH|WARNING",
+            "original_schema": {
+                "columns": [
+                    {"name": "column1", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "column2", "type": "INTEGER", "mode": "REQUIRED"}
+                ],
+                "column_count": 2
+            },
+            "optimized_schema": {
+                "columns": [
+                    {"name": "column1", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "column2", "type": "INTEGER", "mode": "REQUIRED"}
+                ],
+                "column_count": 2
+            },
+            "differences": []
         },
-        "metadata_summary": {
-            "tables_analyzed": 3,
-            "total_data_size": "1.5TB",
-            "partitioned_tables": 2,
-            "clustered_tables": 1
+        "join_validation": {
+            "status": "MATCH|MISMATCH|NOT_APPLICABLE",
+            "original_joins": [
+                {
+                    "type": "INNER|LEFT|RIGHT|FULL",
+                    "left_table": "table1",
+                    "right_table": "table2",
+                    "join_keys": ["key1", "key2"]
+                }
+            ],
+            "optimized_joins": [
+                {
+                    "type": "INNER|LEFT|RIGHT|FULL",
+                    "left_table": "table1",
+                    "right_table": "table2",
+                    "join_keys": ["key1", "key2"]
+                }
+            ],
+            "differences": []
         },
-        "rules_summary": {
-            "total_checked": 22,
-            "violations_found": 5,
-            "compliance_before": "77%",
-            "compliance_after": "100%"
+        "filter_validation": {
+            "status": "MATCH|MISMATCH|OPTIMIZED",
+            "original_filters": ["condition1", "condition2"],
+            "optimized_filters": ["condition1", "condition2", "partition_filter"],
+            "added_filters": ["partition_filter for optimization"],
+            "removed_filters": [],
+            "notes": "Added partition filter for performance without affecting results"
         },
-        "optimization_summary": {
-            "steps_taken": 3,
-            "final_query": "...",
-            "estimated_cost_before": "$XX.XX",
-            "estimated_cost_after": "$X.XX"
+        "aggregation_validation": {
+            "status": "MATCH|MISMATCH|NOT_APPLICABLE",
+            "original_aggregations": ["COUNT(*)", "SUM(amount)"],
+            "optimized_aggregations": ["COUNT(*)", "SUM(amount)"],
+            "group_by_columns": ["column1", "column2"],
+            "differences": []
         },
-        "recommendations": [
-            "Consider partitioning table X by date",
-            "Add clustering on frequently filtered columns",
-            "Schedule regular maintenance for statistics"
-        ],
-        "best_practices": [
-            "Always filter on partition columns first",
-            "Use specific column names instead of SELECT *",
-            "Leverage clustering for common filter patterns"
-        ]
+        "performance_comparison": {
+            "original_bytes_processed": 1234567890,
+            "optimized_bytes_processed": 123456789,
+            "data_reduction_percentage": 90.0,
+            "original_estimated_cost": 5.50,
+            "optimized_estimated_cost": 0.55,
+            "cost_reduction_percentage": 90.0
+        },
+        "validation_details": {
+            "warnings": [
+                "Column order changed but types match",
+                "Additional partition filter added for optimization"
+            ],
+            "errors": [],
+            "info": [
+                "Query optimization successful",
+                "All semantic constraints preserved"
+            ]
+        },
+        "recommendation": "The optimized query is semantically equivalent and safe to use",
+        "final_optimized_query": "SELECT ... (the final validated query)"
     }
     
-    CRITICAL: Output ONLY the JSON. No markdown, no explanations, no text before or after.
-    Base all metrics on actual data from previous stages.
+    CRITICAL: 
+    - Output ONLY the JSON. No markdown, no explanations, no text before or after.
+    - Use the dry_run tool to get actual schema information
+    - Mark validation as PASSED if queries are semantically equivalent
+    - Mark as WARNING if minor differences exist but results are equivalent
+    - Mark as FAILED if queries would return different results
     """,
-    output_key="final_output",
-    after_agent_callback=create_streaming_callback("final_reporter", "Final report generated", "final_output")
+    output_key="validation_output",
+    after_agent_callback=create_streaming_callback("query_validation_agent", "Query validation completed", "validation_output")
 )
 
 # --- Pipeline Definition ---
@@ -448,7 +486,7 @@ streaming_pipeline = SequentialAgent(
         metadata_extractor,
         rule_checker,
         query_optimizer,
-        final_reporter
+        query_validation_agent  # Replaced final_reporter with query_validation_agent
     ]
 )
 

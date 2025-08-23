@@ -322,8 +322,23 @@ export async function optimizeQueryWithADK(query, options = {}) {
                     console.log('Attempting to parse JSON string:', jsonStr);
                     try {
                       // Fix common JSON issues before parsing
+                      let fixedJson = jsonStr;
+                      
+                      // For rule_checker specifically, check for truncated JSON
+                      if (author === 'rule_checker' && !jsonStr.includes('"passed_rules"')) {
+                        // If JSON is truncated after violations array, close it properly
+                        if (jsonStr.includes('"violations": [') && !jsonStr.includes('"passed_rules"')) {
+                          // Find the last complete array element
+                          const lastBraceIndex = jsonStr.lastIndexOf('}');
+                          if (lastBraceIndex > 0) {
+                            // Close the violations array and object
+                            fixedJson = jsonStr.substring(0, lastBraceIndex + 1) + '], "passed_rules": [], "summary": "Partial results due to truncation" }';
+                          }
+                        }
+                      }
+                      
                       // Fix double curly braces from malformed agent output
-                      let fixedJson = jsonStr.replace(/\{\{/g, '{').replace(/\}\}/g, '}');
+                      fixedJson = fixedJson.replace(/\{\{/g, '{').replace(/\}\}/g, '}');
                       // Replace double closing braces with single
                       fixedJson = fixedJson.replace(/\}\},/g, '},');
                       // Ensure last closing is single brace
@@ -358,6 +373,10 @@ export async function optimizeQueryWithADK(query, options = {}) {
                                (stageData.total_optimizations !== undefined || stageData.steps !== undefined)) {
                       console.log('%c📊 Calling onStageComplete for OPTIMIZATION', 'color: blue; font-weight: bold');
                       options.onStageComplete('optimization', stageData);
+                    } else if ((author === 'query_validation_agent' || author === 'query-validation-agent') && 
+                              (stageData.validation_status !== undefined || stageData.schema_validation !== undefined)) {
+                      console.log('%c📊 Calling onStageComplete for VALIDATION', 'color: blue; font-weight: bold');
+                      options.onStageComplete('validation_output', stageData);
                     } else if ((author === 'final_reporter' || author === 'final-reporter') && 
                                (stageData.executive_summary !== undefined || stageData.optimization_summary !== undefined)) {
                       console.log('%c📊 Calling onStageComplete for REPORT', 'color: blue; font-weight: bold');
@@ -747,7 +766,7 @@ function extractStructuredData(events) {
     
     return {
       originalQuery: optimization?.original_query || originalQuery || '',
-      optimizedQuery: optimization?.final_query || finalReport?.optimization_summary?.final_query || '',
+      optimizedQuery: optimization?.optimized_query || optimization?.final_query || finalReport?.optimization_summary?.final_query || '',
       issues: issues,
       suggestions: suggestions,
       validationResult: validationResult,

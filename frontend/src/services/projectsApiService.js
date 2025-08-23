@@ -36,7 +36,7 @@ class ProjectsApiService {
   }
 
   /**
-   * Check permissions for a project
+   * Check permissions for a project (legacy)
    */
   async checkPermission(projectId, permissionType) {
     try {
@@ -60,6 +60,63 @@ class ProjectsApiService {
     } catch (error) {
       console.error('Error checking permission:', error);
       return false;
+    }
+  }
+
+  /**
+   * Check table access for INFORMATION_SCHEMA tables
+   */
+  async checkTableAccess(projectId, tableName, region = 'us') {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/check-table-access`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          table_name: tableName,
+          region: region
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data.has_access || false;
+    } catch (error) {
+      console.error('Error checking table access:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check IAM permissions using BigQuery test_iam_permissions
+   */
+  async checkIAMPermissions(projectId, permissions) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/projects/check-iam-permissions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          permissions: permissions
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data.permissions || [];
+    } catch (error) {
+      console.error('Error checking IAM permissions:', error);
+      return [];
     }
   }
 

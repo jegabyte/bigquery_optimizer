@@ -10,6 +10,7 @@ import Projects from './pages/Projects';
 import QueryAnalysis from './pages/QueryAnalysis.jsx';
 import AnalysisResult from './pages/AnalysisResult_new.jsx';
 import RulesManagement from './pages/RulesManagement';
+import Help from './pages/Help';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const queryClient = new QueryClient();
@@ -51,6 +52,7 @@ function App() {
               <Route path="projects" element={<Projects />} />
               <Route path="projects/:projectId" element={<Projects />} />
               <Route path="rules" element={<RulesManagement />} />
+              <Route path="help" element={<Help />} />
             </Route>
           </Routes>
         </Router>

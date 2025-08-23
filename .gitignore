@@ -78,3 +78,7 @@ tmp/
 .gcloud/
 *.json.key
 service-account-key.json
+
+# Deployment info files
+deployment-info.txt
+deployment-secure-info.txt

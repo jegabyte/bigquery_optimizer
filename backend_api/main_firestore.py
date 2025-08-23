@@ -991,6 +991,153 @@ async def check_permissions(request: Dict[str, Any]):
         logger.error(f"Error checking permissions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/projects/check-table-access")
+async def check_table_access(request: Dict[str, Any]):
+    """Check access to specific INFORMATION_SCHEMA tables"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        table_name = request.get("table_name")
+        region = request.get("region", "us")  # Default to 'us' if not provided
+        
+        # Clean up table name to get just the table part
+        if "." in table_name:
+            table_name = table_name.split(".")[-1]
+        
+        # Format region properly (add 'region-' prefix if not present)
+        if not region.startswith("region-"):
+            region = f"region-{region}"
+        
+        # Check INFORMATION_SCHEMA tables with proper region and location
+        if table_name in ["JOBS", "JOBS_BY_PROJECT", "TABLE_STORAGE", "TABLES"]:
+            # Extract location from region (remove 'region-' prefix for job location)
+            location = region.replace("region-", "")
+            
+            # For JOBS tables, check at project-region level
+            if table_name in ["JOBS", "JOBS_BY_PROJECT"]:
+                try:
+                    query = f"""
+                    SELECT 1
+                    FROM `{project_id}.{region}.INFORMATION_SCHEMA.{table_name}`
+                    LIMIT 1
+                    """
+                    job_config = bigquery.QueryJobConfig(
+                        dry_run=True,
+                        use_query_cache=False
+                    )
+                    bq_client.query(query, job_config=job_config, location=location)
+                    return {"success": True, "has_access": True}
+                except Exception as e:
+                    logger.info(f"Failed to access {table_name} in {region}: {str(e)}")
+                    return {"success": True, "has_access": False}
+            
+            # For TABLE_STORAGE and TABLES, they might be dataset-scoped in some regions
+            elif table_name in ["TABLE_STORAGE", "TABLES"]:
+                # First try project-region level
+                try:
+                    query = f"""
+                    SELECT 1
+                    FROM `{project_id}.{region}.INFORMATION_SCHEMA.{table_name}`
+                    LIMIT 1
+                    """
+                    job_config = bigquery.QueryJobConfig(
+                        dry_run=True,
+                        use_query_cache=False
+                    )
+                    bq_client.query(query, job_config=job_config, location=location)
+                    return {"success": True, "has_access": True}
+                except Exception as e:
+                    logger.debug(f"Project-level {table_name} not accessible, trying dataset-level")
+                    
+                    # If project-level fails, try dataset-level
+                    # These tables exist at dataset level and will be accessible when querying specific datasets
+                    try:
+                        # List datasets to verify project access
+                        datasets = list(bq_client.list_datasets(project=project_id, max_results=1))
+                        if datasets:
+                            # If we can list datasets, the table will be accessible at dataset level
+                            logger.info(f"{table_name} will be accessible at dataset level")
+                            return {"success": True, "has_access": True}
+                    except:
+                        pass
+                    
+                    logger.info(f"Failed to access {table_name} in {region}: {str(e)}")
+                    return {"success": True, "has_access": False}
+        else:
+            return {"success": True, "has_access": False}
+                
+    except Exception as e:
+        logger.error(f"Error checking table access: {e}", exc_info=True)
+        return {"success": False, "has_access": False}
+
+@app.post("/api/projects/check-iam-permissions")
+async def check_iam_permissions(request: Dict[str, Any]):
+    """Check IAM permissions using BigQuery test_iam_permissions"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        project_id = request.get("project_id")
+        permissions = request.get("permissions", [])
+        
+        # Use BigQuery client to test IAM permissions
+        try:
+            from google.cloud import resourcemanager_v3
+            
+            # Create a resource manager client to test project-level permissions
+            rm_client = resourcemanager_v3.ProjectsClient()
+            resource = f"projects/{project_id}"
+            
+            # Test the permissions
+            response = rm_client.test_iam_permissions(
+                resource=resource,
+                permissions=permissions
+            )
+            
+            return {
+                "success": True,
+                "permissions": list(response.permissions)
+            }
+        except Exception as e:
+            # Fallback: try to test permissions using BigQuery operations
+            tested_permissions = []
+            
+            for permission in permissions:
+                if permission == "bigquery.jobs.create":
+                    try:
+                        # Test with dry run query
+                        test_query = "SELECT 1"
+                        job_config = bigquery.QueryJobConfig(dry_run=True)
+                        bq_client.query(test_query, job_config=job_config)
+                        tested_permissions.append(permission)
+                    except:
+                        pass
+                        
+                elif permission == "bigquery.tables.get":
+                    try:
+                        # Try to get table metadata
+                        query = f"""
+                        SELECT table_name
+                        FROM `{project_id}.region-us.INFORMATION_SCHEMA.TABLES`
+                        LIMIT 1
+                        """
+                        job_config = bigquery.QueryJobConfig(dry_run=True)
+                        bq_client.query(query, job_config=job_config)
+                        tested_permissions.append(permission)
+                    except:
+                        pass
+            
+            return {
+                "success": True,
+                "permissions": tested_permissions
+            }
+            
+    except Exception as e:
+        logger.error(f"Error checking IAM permissions: {e}", exc_info=True)
+        return {"success": False, "permissions": []}
+
 @app.post("/api/projects/validate-access")
 async def validate_access(request: Dict[str, Any]):
     """Validate project access"""

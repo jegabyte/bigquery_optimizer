@@ -132,17 +132,18 @@ fi
 ### 4. Docker-Based Deployment with Different Backends
 
 #### Dockerfile.backend
+
 ```dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
 
 # Copy requirements
-COPY backend_api/requirements.txt .
+COPY ../backend_api/requirements.txt .
 RUN pip install -r requirements.txt
 
 # Copy application code
-COPY backend_api/ .
+COPY ../backend_api .
 
 # Use environment variable to determine which main file to run
 ENV BACKEND_TYPE=${BACKEND_TYPE:-bigquery}

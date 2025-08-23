@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { FiDatabase, FiCode, FiHardDrive, FiLogOut, FiHome, FiLayers, FiSettings } from 'react-icons/fi';
+import { FiDatabase, FiCode, FiHardDrive, FiLogOut, FiHome, FiLayers, FiSettings, FiHelpCircle } from 'react-icons/fi';
 
 const Layout = () => {
   const { user, logout } = useAuth();
@@ -17,6 +17,7 @@ const Layout = () => {
     { path: '/query-analysis', name: 'Query Analysis', icon: FiCode },
     { path: '/projects', name: 'Project Analysis', icon: FiLayers },
     { path: '/rules', name: 'Rules', icon: FiSettings },
+    { path: '/help', name: 'Help', icon: FiHelpCircle },
   ];
 
   return (

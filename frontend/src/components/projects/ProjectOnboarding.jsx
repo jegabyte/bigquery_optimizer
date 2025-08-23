@@ -6,14 +6,9 @@ import {
   FiChevronLeft,
   FiCheck,
   FiAlertTriangle,
-  FiCloud,
-  FiSettings,
-  FiBarChart2,
-  FiZap,
   FiCheckCircle,
   FiXCircle,
-  FiLoader,
-  FiCalendar
+  FiLoader
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { projectsApiService } from '../../services/projectsApiService';
@@ -27,6 +22,7 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
     customDateRange: false,
     startDate: '',
     endDate: '',
+    region: 'us',
     pricingMode: 'on-demand',
     pricePerTB: 5.00,
     useCustomTables: false,
@@ -41,15 +37,64 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
   const [permissions, setPermissions] = useState({
     information_schema_jobs: null,
     information_schema_jobs_by_project: null,
-    bigquery_data_viewer: null,
-    bigquery_job_user: null
+    information_schema_table_storage: null,
+    information_schema_tables: null,
+    bigquery_jobs_create: null,
+    bigquery_tables_get: null
+  });
+  const [discoveryData, setDiscoveryData] = useState({
+    queryTemplates: [],
+    tables: [],
+    totalQueries: 0,
+    totalDataScanned: 0
   });
 
+  // Reset all form state when modal opens or closes
+  React.useEffect(() => {
+    if (isOpen) {
+      // Reset everything to initial state when modal opens
+      setCurrentStep(0);
+      setProjectData({
+        projectId: '',
+        name: '',
+        analysisWindow: 30,
+        customDateRange: false,
+        startDate: '',
+        endDate: '',
+        region: 'us',
+        pricingMode: 'on-demand',
+        pricePerTB: 5.00,
+        useCustomTables: false,
+        customJobsTable: '',
+        customJobsByProjectTable: '',
+        customTableStorageTable: '',
+        customTablesTable: ''
+      });
+      setIsValidating(false);
+      setIsCreating(false);
+      setValidationResult(null);
+      setPermissions({
+        information_schema_jobs: null,
+        information_schema_jobs_by_project: null,
+        information_schema_table_storage: null,
+        information_schema_tables: null,
+        bigquery_jobs_create: null,
+        bigquery_tables_get: null
+      });
+      setDiscoveryData({
+        queryTemplates: [],
+        tables: [],
+        totalQueries: 0,
+        totalDataScanned: 0
+      });
+    }
+  }, [isOpen]);
+
   const steps = [
-    { id: 'project', title: 'Project Details', icon: FiCloud },
-    { id: 'settings', title: 'Analysis Settings', icon: FiSettings },
-    { id: 'validation', title: 'Validation', icon: FiBarChart2 },
-    { id: 'review', title: 'Review & Create', icon: FiZap }
+    { id: 'project', title: 'Project Details' },
+    { id: 'settings', title: 'Analysis Settings' },
+    { id: 'validation', title: 'Validation' },
+    { id: 'review', title: 'Review & Create' }
   ];
 
   const handleNext = () => {
@@ -67,7 +112,7 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
     }
   };
 
-  const checkPermissions = async () => {
+  const checkPermissions = async (updateProgress = false) => {
     try {
       // Use custom tables if specified, otherwise default
       const jobsTable = projectData.useCustomTables && projectData.customJobsTable 
@@ -77,50 +122,105 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
       const jobsByProjectTable = projectData.useCustomTables && projectData.customJobsByProjectTable
         ? projectData.customJobsByProjectTable
         : 'INFORMATION_SCHEMA.JOBS_BY_PROJECT';
+        
+      const tableStorageTable = projectData.useCustomTables && projectData.customTableStorageTable
+        ? projectData.customTableStorageTable
+        : 'INFORMATION_SCHEMA.TABLE_STORAGE';
+        
+      const tablesTable = projectData.useCustomTables && projectData.customTablesTable
+        ? projectData.customTablesTable
+        : 'INFORMATION_SCHEMA.TABLES';
       
-      // Check JOBS table access
-      const jobsCheck = await projectsApiService.checkPermission(
+      // Check INFORMATION_SCHEMA.JOBS access
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_jobs: 'checking' }));
+      }
+      const jobsCheck = await projectsApiService.checkTableAccess(
         projectData.projectId,
-        jobsTable
+        jobsTable,
+        projectData.region
       );
-      
-      // Check JOBS_BY_PROJECT table access (if specified)
-      let jobsByProjectCheck = false;
-      if (jobsByProjectTable) {
-        jobsByProjectCheck = await projectsApiService.checkPermission(
-          projectData.projectId,
-          jobsByProjectTable
-        );
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_jobs: jobsCheck }));
       }
       
-      // Check BigQuery Data Viewer role
-      const dataViewerCheck = await projectsApiService.checkPermission(
+      // Check INFORMATION_SCHEMA.JOBS_BY_PROJECT access
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_jobs_by_project: 'checking' }));
+      }
+      const jobsByProjectCheck = await projectsApiService.checkTableAccess(
         projectData.projectId,
-        'bigquery.tables.getData'
+        jobsByProjectTable,
+        projectData.region
       );
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_jobs_by_project: jobsByProjectCheck }));
+      }
       
-      // Check BigQuery Job User role
-      const jobUserCheck = await projectsApiService.checkPermission(
+      // Check INFORMATION_SCHEMA.TABLE_STORAGE access
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_table_storage: 'checking' }));
+      }
+      const tableStorageCheck = await projectsApiService.checkTableAccess(
         projectData.projectId,
-        'bigquery.jobs.create'
+        tableStorageTable,
+        projectData.region
       );
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_table_storage: tableStorageCheck }));
+      }
+      
+      // Check INFORMATION_SCHEMA.TABLES access
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_tables: 'checking' }));
+      }
+      const tablesCheck = await projectsApiService.checkTableAccess(
+        projectData.projectId,
+        tablesTable,
+        projectData.region
+      );
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, information_schema_tables: tablesCheck }));
+      }
+      
+      // Check BigQuery IAM permissions
+      if (updateProgress) {
+        setPermissions(prev => ({ ...prev, bigquery_jobs_create: 'checking', bigquery_tables_get: 'checking' }));
+      }
+      const iamPermissions = await projectsApiService.checkIAMPermissions(
+        projectData.projectId,
+        ['bigquery.jobs.create', 'bigquery.tables.get']
+      );
+      if (updateProgress) {
+        setPermissions(prev => ({ 
+          ...prev, 
+          bigquery_jobs_create: iamPermissions.includes('bigquery.jobs.create'),
+          bigquery_tables_get: iamPermissions.includes('bigquery.tables.get')
+        }));
+      }
       
       return {
         information_schema_jobs: jobsCheck,
         information_schema_jobs_by_project: jobsByProjectCheck,
-        bigquery_data_viewer: dataViewerCheck,
-        bigquery_job_user: jobUserCheck,
+        information_schema_table_storage: tableStorageCheck,
+        information_schema_tables: tablesCheck,
+        bigquery_jobs_create: iamPermissions.includes('bigquery.jobs.create'),
+        bigquery_tables_get: iamPermissions.includes('bigquery.tables.get'),
         custom_tables_used: projectData.useCustomTables,
         jobs_table: jobsTable,
-        jobs_by_project_table: jobsByProjectTable
+        jobs_by_project_table: jobsByProjectTable,
+        table_storage_table: tableStorageTable,
+        tables_table: tablesTable
       };
     } catch (error) {
       console.error('Permission check failed:', error);
       return {
         information_schema_jobs: false,
         information_schema_jobs_by_project: false,
-        bigquery_data_viewer: false,
-        bigquery_job_user: false,
+        information_schema_table_storage: false,
+        information_schema_tables: false,
+        bigquery_jobs_create: false,
+        bigquery_tables_get: false,
         custom_tables_used: false
       };
     }
@@ -130,9 +230,8 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
     setIsValidating(true);
     
     try {
-      // Check permissions first
-      const permissionResults = await checkPermissions();
-      setPermissions(permissionResults);
+      // Check permissions first with inline progress updates
+      const permissionResults = await checkPermissions(true);
       
       // Check if we have at least one INFORMATION_SCHEMA access
       const hasInfoSchemaAccess = 
@@ -150,7 +249,7 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
         return;
       }
       
-      // Run a test query to validate access
+      // Run a test query to validate access and get discovery data
       const testResult = await projectsApiService.validateProjectAccess({
         projectId: projectData.projectId,
         analysisWindow: projectData.customDateRange 
@@ -163,6 +262,16 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
           tables_table: projectData.customTablesTable
         } : null
       });
+      
+      // Extract discovery data if available
+      if (testResult.discoveryData) {
+        setDiscoveryData({
+          queryTemplates: testResult.discoveryData.templates || [],
+          tables: testResult.discoveryData.tables || [],
+          totalQueries: testResult.discoveryData.totalQueries || testResult.jobsFound || 0,
+          totalDataScanned: testResult.discoveryData.totalDataScanned || 0
+        });
+      }
       
       setValidationResult({
         success: true,
@@ -200,6 +309,7 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
           project_id: projectData.projectId,
           display_name: projectData.name || projectData.projectId,
           analysis_window: projectData.analysisWindow,
+          region: projectData.region,
           regions: [],
           datasets: [],
           pricing_mode: projectData.pricingMode,
@@ -228,6 +338,7 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
         },
         body: JSON.stringify({
           project_id: projectData.projectId,
+          region: projectData.region,
           analysis_window: projectData.customDateRange 
             ? { startDate: projectData.startDate, endDate: projectData.endDate }
             : projectData.analysisWindow,
@@ -301,27 +412,34 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
               </p>
             </div>
 
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <FiAlertTriangle className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-blue-800 dark:text-blue-300">
-                    Required Permissions
-                  </h3>
-                  <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">
-                    We'll check access to INFORMATION_SCHEMA.JOBS or INFORMATION_SCHEMA.JOBS_BY_PROJECT
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
         );
 
       case 1:
         return (
           <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                BigQuery Region
+              </label>
+              <select
+                value={projectData.region}
+                onChange={(e) => setProjectData({ ...projectData, region: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="us">US (region-us)</option>
+                <option value="eu">EU (region-eu)</option>
+                <option value="asia-northeast1">Asia Northeast 1 (region-asia-northeast1)</option>
+                <option value="us-central1">US Central 1 (region-us-central1)</option>
+                <option value="europe-west1">Europe West 1 (region-europe-west1)</option>
+                <option value="asia-southeast1">Asia Southeast 1 (region-asia-southeast1)</option>
+                <option value="australia-southeast1">Australia Southeast 1 (region-australia-southeast1)</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Select the region where your BigQuery datasets are located
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Analysis Window
@@ -506,51 +624,144 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
       case 2:
         return (
           <div className="space-y-6">
-            {isValidating ? (
-              <div className="text-center py-12">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 dark:bg-blue-950/30 rounded-full mb-4">
-                  <FiLoader className="animate-spin h-8 w-8 text-blue-600 dark:text-blue-400" />
+            <div className="space-y-6">
+              
+              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  {isValidating ? 'Checking access...' : 'Access requirements:'}
+                </h4>
+                
+                <div className="space-y-4">
+                  {/* INFORMATION_SCHEMA Tables */}
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                      INFORMATION_SCHEMA Tables
+                    </h5>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.information_schema_jobs === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.information_schema_jobs === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.information_schema_jobs ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          JOBS
+                        </span>
+                        {permissions.information_schema_jobs === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.information_schema_jobs_by_project === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.information_schema_jobs_by_project === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.information_schema_jobs_by_project ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          JOBS_BY_PROJECT
+                        </span>
+                        {permissions.information_schema_jobs_by_project === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.information_schema_table_storage === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.information_schema_table_storage === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.information_schema_table_storage ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          TABLE_STORAGE
+                        </span>
+                        {permissions.information_schema_table_storage === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.information_schema_tables === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.information_schema_tables === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.information_schema_tables ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          TABLES
+                        </span>
+                        {permissions.information_schema_tables === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                    </ul>
+                  </div>
+                  
+                  {/* BigQuery Permissions */}
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                      BigQuery Permissions
+                    </h5>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.bigquery_jobs_create === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.bigquery_jobs_create === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.bigquery_jobs_create ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          bigquery.jobs.create
+                        </span>
+                        {permissions.bigquery_jobs_create === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                      <li className="flex items-center justify-between">
+                        <span className="flex items-center">
+                          {permissions.bigquery_tables_get === null ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          ) : permissions.bigquery_tables_get === 'checking' ? (
+                            <FiLoader className="h-4 w-4 mr-2 text-blue-500 animate-spin" />
+                          ) : permissions.bigquery_tables_get ? (
+                            <FiCheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <FiXCircle className="h-4 w-4 mr-2 text-red-500" />
+                          )}
+                          bigquery.tables.get
+                        </span>
+                        {permissions.bigquery_tables_get === 'checking' && (
+                          <span className="text-xs text-blue-500">Checking...</span>
+                        )}
+                      </li>
+                    </ul>
+                  </div>
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                  Validating Project Configuration
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Checking INFORMATION_SCHEMA access and permissions...
-                </p>
               </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="text-center py-8">
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Click "Validate" to verify your configuration and check permissions
+              
+              {isValidating && (
+                <div className="text-center py-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Discovering query templates and analyzing tables...
                   </p>
                 </div>
-                
-                <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Permissions to be checked:
-                  </h4>
-                  <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                    <li className="flex items-center">
-                      <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
-                      INFORMATION_SCHEMA.JOBS access
-                    </li>
-                    <li className="flex items-center">
-                      <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
-                      INFORMATION_SCHEMA.JOBS_BY_PROJECT access
-                    </li>
-                    <li className="flex items-center">
-                      <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
-                      BigQuery Data Viewer role
-                    </li>
-                    <li className="flex items-center">
-                      <FiCheckCircle className="h-4 w-4 mr-2 text-gray-400" />
-                      BigQuery Job User role
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         );
 
@@ -561,87 +772,142 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
               <>
                 {validationResult.success ? (
                   <>
-                    <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                      <div className="flex">
-                        <FiCheck className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                        <div className="ml-3">
-                          <h3 className="text-sm font-medium text-green-800 dark:text-green-300">
-                            Validation Successful
-                          </h3>
-                          <p className="mt-1 text-sm text-green-700 dark:text-green-400">
-                            Project configuration validated successfully
-                          </p>
-                        </div>
-                      </div>
-                    </div>
 
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                         Permission Check Results
                       </h3>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            INFORMATION_SCHEMA.JOBS
-                          </span>
-                          {validationResult.permissions.information_schema_jobs ? (
-                            <FiCheckCircle className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <FiXCircle className="h-5 w-5 text-red-500" />
-                          )}
+                      <div className="space-y-3">
+                        <div>
+                          <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                            INFORMATION_SCHEMA Tables
+                          </h5>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">JOBS</span>
+                              {validationResult.permissions.information_schema_jobs ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">JOBS_BY_PROJECT</span>
+                              {validationResult.permissions.information_schema_jobs_by_project ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">TABLE_STORAGE</span>
+                              {validationResult.permissions.information_schema_table_storage ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">TABLES</span>
+                              {validationResult.permissions.information_schema_tables ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            INFORMATION_SCHEMA.JOBS_BY_PROJECT
-                          </span>
-                          {validationResult.permissions.information_schema_jobs_by_project ? (
-                            <FiCheckCircle className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <FiXCircle className="h-5 w-5 text-red-500" />
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            BigQuery Data Viewer
-                          </span>
-                          {validationResult.permissions.bigquery_data_viewer ? (
-                            <FiCheckCircle className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <FiXCircle className="h-5 w-5 text-red-500" />
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            BigQuery Job User
-                          </span>
-                          {validationResult.permissions.bigquery_job_user ? (
-                            <FiCheckCircle className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <FiXCircle className="h-5 w-5 text-red-500" />
-                          )}
+                        <div>
+                          <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                            BigQuery Permissions
+                          </h5>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">bigquery.jobs.create</span>
+                              {validationResult.permissions.bigquery_jobs_create ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between py-1 px-3 bg-gray-50 dark:bg-gray-900/50 rounded">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">bigquery.tables.get</span>
+                              {validationResult.permissions.bigquery_tables_get ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <FiXCircle className="h-4 w-4 text-red-500" />
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                        Discovery Results
-                      </h3>
-                      <div className="space-y-3">
-                        <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">Jobs Found</span>
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {validationResult.jobsFound?.toLocaleString() || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between py-2">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">Estimated Templates</span>
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            ~{validationResult.estimatedTemplates || 0}
-                          </span>
+                    
+                    {discoveryData.queryTemplates.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                          Discovered Query Templates
+                        </h3>
+                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 max-h-48 overflow-y-auto">
+                          <ul className="space-y-2">
+                            {discoveryData.queryTemplates.slice(0, 5).map((template, index) => (
+                              <li key={index} className="text-sm">
+                                <div className="flex items-start">
+                                  <span className="text-gray-500 dark:text-gray-400 mr-2">{index + 1}.</span>
+                                  <div className="flex-1">
+                                    <div className="text-gray-700 dark:text-gray-300 font-mono text-xs truncate">
+                                      {template.pattern || template.query_pattern || template}
+                                    </div>
+                                    {template.count && (
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        {template.count} occurrences
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                            {discoveryData.queryTemplates.length > 5 && (
+                              <li className="text-sm text-gray-500 dark:text-gray-400 italic">
+                                ... and {discoveryData.queryTemplates.length - 5} more templates
+                              </li>
+                            )}
+                          </ul>
                         </div>
                       </div>
-                    </div>
+                    )}
+                    
+                    {discoveryData.tables.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                          Table Analysis
+                        </h3>
+                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 max-h-48 overflow-y-auto">
+                          <ul className="space-y-2">
+                            {discoveryData.tables.slice(0, 5).map((table, index) => (
+                              <li key={index} className="text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-700 dark:text-gray-300 font-mono text-xs">
+                                    {table.table_name || table.name || table}
+                                  </span>
+                                  {table.size_gb && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {table.size_gb.toFixed(2)} GB
+                                    </span>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                            {discoveryData.tables.length > 5 && (
+                              <li className="text-sm text-gray-500 dark:text-gray-400 italic">
+                                ... and {discoveryData.tables.length - 5} more tables
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -659,6 +925,12 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
                             <dt className="text-sm text-gray-600 dark:text-gray-400">Display Name:</dt>
                             <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               {projectData.name || projectData.projectId}
+                            </dd>
+                          </div>
+                          <div className="flex justify-between">
+                            <dt className="text-sm text-gray-600 dark:text-gray-400">Region:</dt>
+                            <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              region-{projectData.region}
                             </dd>
                           </div>
                           <div className="flex justify-between">
@@ -711,7 +983,10 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black bg-opacity-50 z-40"
-            onClick={onClose}
+            onClick={() => {
+              // Call onClose which will trigger the useEffect to reset state
+              onClose();
+            }}
           />
 
           {/* Modal */}
@@ -733,7 +1008,10 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
                   </p>
                 </div>
                 <button
-                  onClick={onClose}
+                  onClick={() => {
+                    // Call onClose which will trigger the useEffect to reset state
+                    onClose();
+                  }}
                   className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
                   <FiX className="h-5 w-5" />
@@ -744,22 +1022,17 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                 <div className="flex items-center justify-between">
                   {steps.map((step, index) => {
-                    const Icon = step.icon;
                     return (
                       <React.Fragment key={step.id}>
                         <div className="flex items-center">
                           <div
-                            className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors ${
+                            className={`flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors ${
                               index <= currentStep
                                 ? 'bg-blue-600 border-blue-600 text-white'
                                 : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400'
                             }`}
                           >
-                            {index < currentStep ? (
-                              <FiCheck className="h-5 w-5" />
-                            ) : (
-                              <Icon className="h-5 w-5" />
-                            )}
+                            <FiCheck className="h-5 w-5" />
                           </div>
                           <div className="ml-3">
                             <p className={`text-sm font-medium ${
@@ -806,7 +1079,10 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
 
                 <div className="flex items-center space-x-3">
                   <button
-                    onClick={onClose}
+                    onClick={() => {
+                      // Call onClose which will trigger the useEffect to reset state
+                      onClose();
+                    }}
                     className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
                   >
                     Cancel

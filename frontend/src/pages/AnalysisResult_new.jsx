@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import MonacoEditor from '@monaco-editor/react';
-import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiPlus, FiTrendingDown, FiZap, FiActivity, FiLayout, FiCode } from 'react-icons/fi';
+import { FiArrowLeft, FiCheck, FiX, FiAlertTriangle, FiInfo, FiDollarSign, FiCopy, FiShare2, FiPlay, FiDatabase, FiSearch, FiEdit3, FiCheckCircle, FiXCircle, FiPlus, FiTrendingDown, FiZap, FiActivity, FiLayout, FiCode } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
@@ -18,9 +18,31 @@ const formatCost = (cost) => {
 
 const formatBytes = (bytes) => {
   if (!bytes || bytes === 0) return '0 B';
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+};
+
+const formatGBSize = (sizeInGB) => {
+  if (!sizeInGB || sizeInGB === 0) return '0 B';
+  
+  // Convert GB to bytes first
+  const bytes = sizeInGB * 1024 * 1024 * 1024;
+  
+  // Determine the appropriate unit
+  if (sizeInGB >= 1024) {
+    // TB or PB
+    if (sizeInGB >= 1024 * 1024) {
+      return `${(sizeInGB / (1024 * 1024)).toFixed(2)} PB`;
+    }
+    return `${(sizeInGB / 1024).toFixed(2)} TB`;
+  } else if (sizeInGB >= 1) {
+    return `${sizeInGB.toFixed(2)} GB`;
+  } else if (sizeInGB >= 0.001) {
+    return `${(sizeInGB * 1024).toFixed(2)} MB`;
+  } else {
+    return `${(sizeInGB * 1024 * 1024).toFixed(2)} KB`;
+  }
 };
 
 // BigQuery-style SQL Formatter
@@ -358,13 +380,9 @@ const AnalysisResult = () => {
     
     // Step 1: Validate the query first
     try {
-      toast.loading('Validating query...', { id: 'validation' });
-      
       const validationResult = await validateQuery(query, options.projectId);
       
       if (!validationResult.valid) {
-        toast.dismiss('validation');
-        
         // Set validation error to display below query
         setValidationError({
           type: validationResult.error_type,
@@ -387,27 +405,10 @@ const AnalysisResult = () => {
         );
         
         if (!shouldContinue) {
-          toast.dismiss('validation');
           setLoading(false);
           return;
         }
       }
-      
-      // Show validation success with details
-      toast.success(
-        <div>
-          <div>Query validated successfully!</div>
-          {validationResult.validation_details && (
-            <div className="text-sm mt-1 opacity-90">
-              Will process: {validationResult.validation_details.formatted_bytes || 'Unknown size'}
-              {validationResult.validation_details.estimated_cost > 0 && 
-                ` (Est. cost: $${validationResult.validation_details.estimated_cost.toFixed(4)})`
-              }
-            </div>
-          )}
-        </div>,
-        { id: 'validation', duration: 3000 }
-      );
       
       // Now show progress after successful validation
       setShowProgress(true);
@@ -419,7 +420,6 @@ const AnalysisResult = () => {
       }));
       
     } catch (validationError) {
-      toast.dismiss('validation');
       console.error('Validation error:', validationError);
       toast.error('Failed to validate query. Proceeding with optimization anyway.', { duration: 3000 });
     }
@@ -968,7 +968,7 @@ const AnalysisResult = () => {
                   </div>
                   <span className="text-sm text-gray-600">
                     {getStageData('metadata') 
-                      ? `${getStageData('metadata').tables_found} table(s), ${getStageData('metadata').total_size_gb}GB`
+                      ? `${getStageData('metadata').tables_found} table(s), ${formatGBSize(getStageData('metadata').total_size_gb)}${getStageData('metadata').execution_time ? ` • ${getStageData('metadata').execution_time}s` : ''}`
                       : currentStep === 0 
                         ? 'Processing...'
                         : 'Waiting...'}
@@ -1037,7 +1037,7 @@ const AnalysisResult = () => {
                               <span className="text-gray-500">Rows:</span> {table.row_count?.toLocaleString()}
                             </div>
                             <div>
-                              <span className="text-gray-500">Size:</span> {table.size_gb}GB
+                              <span className="text-gray-500">Size:</span> {formatGBSize(table.size_gb)}
                             </div>
                             {table.partitioned && (
                               <div className="col-span-2">
@@ -1059,13 +1059,13 @@ const AnalysisResult = () => {
                               </div>
                               {table.view_definition.underlying_tables?.map((ut, utIdx) => (
                                 <div key={utIdx} className="text-xs ml-2 mb-1">
-                                  • {ut.table_name}: {ut.size_gb}GB, {ut.row_count?.toLocaleString()} rows
+                                  • {ut.table_name}: {formatGBSize(ut.size_gb)}, {ut.row_count?.toLocaleString()} rows
                                   {ut.partitioned && ' (Partitioned)'}
                                   {ut.clustered && ' (Clustered)'}
                                 </div>
                               ))}
                               <div className="text-xs text-purple-600 mt-2">
-                                Total: {table.view_definition.total_underlying_size_gb}GB, 
+                                Total: {formatGBSize(table.view_definition.total_underlying_size_gb)}, 
                                 {' '}{table.view_definition.total_underlying_rows?.toLocaleString()} rows
                               </div>
                             </div>
@@ -1121,7 +1121,7 @@ const AnalysisResult = () => {
                   </div>
                   <span className="text-sm text-gray-600">
                     {getStageData('rules') 
-                      ? `${getStageData('rules').violations_found} issue(s) found`
+                      ? `${getStageData('rules').violations_found} issue(s) found${getStageData('rules').execution_time ? ` • ${getStageData('rules').execution_time}s` : ''}`
                       : currentStep === 1 
                         ? 'Processing...'
                         : 'Waiting...'}
@@ -1247,6 +1247,8 @@ const AnalysisResult = () => {
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 2 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
+                    ) : analysisStatus === 'completed' || analysisStatus === 'failed' ? (
+                      <FiXCircle className="h-5 w-5 text-gray-400" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
@@ -1256,10 +1258,12 @@ const AnalysisResult = () => {
                   </div>
                   <span className="text-sm text-gray-600">
                     {getStageData('optimization') 
-                      ? `${getStageData('optimization').total_optimizations} optimization(s) applied`
+                      ? `${getStageData('optimization').total_optimizations} optimization(s) applied${getStageData('optimization').execution_time ? ` • ${getStageData('optimization').execution_time}s` : ''}`
                       : currentStep === 2 
                         ? 'Processing...'
-                        : 'Waiting...'}
+                        : analysisStatus === 'completed' || analysisStatus === 'failed'
+                          ? 'Not completed'
+                          : 'Waiting...'}
                   </span>
                 </div>
               </button>
@@ -1311,77 +1315,51 @@ const AnalysisResult = () => {
                   {/* Rendered view */}
                   {optimizationView === 'rendered' && (
                     <div className="space-y-3">
-                      {getStageData('optimization').steps && getStageData('optimization').steps.length > 0 && (
+                      {/* Show optimized query */}
+                      {getStageData('optimization').optimized_query && (
+                        <div className="bg-gray-900 text-gray-100 rounded p-3">
+                          <div className="text-sm font-semibold mb-2">Optimized Query</div>
+                          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                            {formatSQL(getStageData('optimization').optimized_query)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {/* Show optimizations applied */}
+                      {getStageData('optimization').optimizations_applied && getStageData('optimization').optimizations_applied.length > 0 && (
                         <div className="space-y-2">
-                          <div className="text-xs font-semibold text-blue-700">Optimization Steps:</div>
-                          {getStageData('optimization').steps.map((step, idx) => (
-                            <div key={idx} className="border-l-4 border-blue-400 pl-3 py-2 bg-gray-50 rounded">
-                              <div className="font-medium text-sm">
-                                Step {step.step}: {step.optimization}
-                              </div>
-                              {/* Show old format improvement if it exists */}
-                              {step.improvement && (
-                                <div className="text-xs text-green-600 mt-1">
-                                  <span className="font-medium">Improvement:</span> {step.improvement}
-                                </div>
-                              )}
-                              
-                              {/* Show new format actual_improvement if it exists */}
-                              {step.actual_improvement && (
-                                <div className="space-y-1 mt-2">
-                                  <div className="text-xs text-green-600">
-                                    <span className="font-medium">✅ Validated Improvement:</span> {step.actual_improvement.percentage_reduction}% reduction
-                                  </div>
-                                  <div className="text-xs text-blue-600">
-                                    <span className="font-medium">💾 Data Saved:</span> {step.actual_improvement.bytes_saved_formatted}
-                                  </div>
-                                  <div className="text-xs text-purple-600">
-                                    <span className="font-medium">💰 Cost Saved:</span> ${step.actual_improvement.cost_saved_usd}
-                                  </div>
-                                </div>
-                              )}
-                              
-                              {/* Show validation results if present */}
-                              {step.validation && (
-                                <div className="text-xs text-gray-600 mt-1 bg-blue-50 p-2 rounded">
-                                  <span className="font-medium">After this step:</span> {step.validation.bytes_formatted} processed 
-                                  (${step.validation.estimated_cost_usd})
-                                </div>
-                              )}
-                              
-                              {/* Show old format bytes_saved if present */}
-                              {step.bytes_saved && !step.actual_improvement && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                  <span className="font-medium">Data Saved:</span> {step.bytes_saved}
-                                </div>
-                              )}
+                          <div className="text-xs font-semibold text-blue-700">Optimizations Applied:</div>
+                          {getStageData('optimization').optimizations_applied.map((optimization, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs">
+                              <FiCheckCircle className="h-3 w-3 text-green-600 mt-0.5 flex-shrink-0" />
+                              <span className="text-gray-700">{optimization}</span>
                             </div>
                           ))}
                         </div>
                       )}
                       
-                      {/* Show new format total_actual_savings if available */}
-                      {getStageData('optimization').total_actual_savings && (
+                      {/* Show performance improvement if available */}
+                      {getStageData('optimization').performance_improvement && (
                         <div className="bg-gradient-to-r from-green-50 to-blue-50 p-4 rounded-lg border border-green-200">
                           <div className="text-sm font-bold text-green-800 mb-2">
-                            🎯 Total Validated Savings
+                            Performance Improvement
                           </div>
                           <div className="grid grid-cols-3 gap-3">
                             <div className="text-center">
                               <div className="text-2xl font-bold text-green-600">
-                                {getStageData('optimization').total_actual_savings.percentage_reduction}%
+                                {getStageData('optimization').performance_improvement.percentage_reduction}%
                               </div>
                               <div className="text-xs text-gray-600">Reduction</div>
                             </div>
                             <div className="text-center">
                               <div className="text-lg font-bold text-blue-600">
-                                {getStageData('optimization').total_actual_savings.bytes_saved_formatted}
+                                {getStageData('optimization').performance_improvement.bytes_saved_formatted}
                               </div>
                               <div className="text-xs text-gray-600">Data Saved</div>
                             </div>
                             <div className="text-center">
                               <div className="text-lg font-bold text-purple-600">
-                                ${getStageData('optimization').total_actual_savings.cost_saved_usd}
+                                ${getStageData('optimization').performance_improvement.cost_saved_usd}
                               </div>
                               <div className="text-xs text-gray-600">Cost Saved</div>
                             </div>
@@ -1389,20 +1367,6 @@ const AnalysisResult = () => {
                           {getStageData('optimization').summary && (
                             <div className="text-xs text-gray-700 mt-3 pt-3 border-t border-green-200">
                               {getStageData('optimization').summary}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* Fallback to old format if new format not available */}
-                      {!getStageData('optimization').total_actual_savings && getStageData('optimization').total_improvement && (
-                        <div className="bg-green-50 p-3 rounded">
-                          <div className="text-sm font-semibold text-green-700">
-                            Total Improvement: {getStageData('optimization').total_improvement}
-                          </div>
-                          {getStageData('optimization').total_optimizations && (
-                            <div className="text-xs text-gray-600 mt-1">
-                              Applied {getStageData('optimization').total_optimizations} optimization(s)
                             </div>
                           )}
                         </div>
@@ -1420,13 +1384,13 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 4: Optimization Summary Agent */}
+            {/* Stage 4: Query Validation Agent */}
             <div>
               <button
-                onClick={() => getStageData('report') && setSelectedStage(selectedStage === 'report' ? null : 'report')}
-                disabled={!getStageData('report')}
+                onClick={() => getStageData('validation_output') && setSelectedStage(selectedStage === 'validation_output' ? null : 'validation_output')}
+                disabled={!getStageData('validation_output')}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  getStageData('report') 
+                  getStageData('validation_output') 
                     ? 'bg-green-50 hover:bg-green-100 cursor-pointer' 
                     : currentStep === 3 
                       ? 'bg-yellow-50 border-2 border-yellow-300 animate-pulse'
@@ -1435,27 +1399,27 @@ const AnalysisResult = () => {
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    {getStageData('report') ? (
+                    {getStageData('validation_output') ? (
                       <FiCheckCircle className="h-5 w-5 text-green-600" />
                     ) : currentStep === 3 ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-yellow-600 border-t-transparent" />
                     ) : (
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
-                    <span className={`font-medium ${!getStageData('report') && currentStep !== 3 ? 'text-gray-400' : ''}`}>
-                      Optimization Summary Agent
+                    <span className={`font-medium ${!getStageData('validation_output') && currentStep !== 3 ? 'text-gray-400' : ''}`}>
+                      Query Validation Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {getStageData('report') 
-                      ? 'Complete'
+                    {getStageData('validation_output') 
+                      ? `Complete${getStageData('validation_output').execution_time ? ` • ${getStageData('validation_output').execution_time}s` : ''}`
                       : currentStep === 3 
                         ? 'Processing...'
                         : 'Waiting...'}
                   </span>
                 </div>
               </button>
-              {selectedStage === 'report' && getStageData('report') && (
+              {selectedStage === 'validation_output' && getStageData('validation_output') && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -1489,89 +1453,125 @@ const AnalysisResult = () => {
                     </div>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(JSON.stringify(getStageData('report'), null, 2));
-                        setCopiedStage('report');
+                        navigator.clipboard.writeText(JSON.stringify(getStageData('validation_output'), null, 2));
+                        setCopiedStage('validation_output');
                         setTimeout(() => setCopiedStage(null), 2000);
                       }}
                       className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
                     >
-                      {copiedStage === 'report' ? <FiCheck className="text-green-600" /> : <FiCopy />}
-                      {copiedStage === 'report' ? 'Copied!' : 'Copy JSON'}
+                      {copiedStage === 'validation_output' ? <FiCheck className="text-green-600" /> : <FiCopy />}
+                      {copiedStage === 'validation_output' ? 'Copied!' : 'Copy JSON'}
                     </button>
                   </div>
 
                   {/* Rendered view */}
                   {reportView === 'rendered' && (
                     <div className="space-y-3">
-                      {getStageData('report').executive_summary && (
-                        <div className="bg-green-50 p-3 rounded">
-                          <div className="text-sm font-semibold mb-2">Executive Summary</div>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-gray-500">Cost Reduction:</span> 
-                              <span className="font-semibold text-green-600 ml-1">{getStageData('report').executive_summary.cost_reduction}</span>
+                      {/* Validation Checklist */}
+                      {getStageData('validation_output') && (
+                        <div className="space-y-2">
+                          {/* Schema Match Check */}
+                          {getStageData('validation_output').schema_validation && (
+                            <div className="flex items-start gap-2 text-xs">
+                              {getStageData('validation_output').schema_validation.status === 'MATCH' ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                              ) : (
+                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
+                              )}
+                              <div>
+                                <span className="text-gray-700">Schema match</span>
+                                <div className="text-gray-500 mt-0.5">
+                                  {getStageData('validation_output').schema_validation.status === 'MATCH' 
+                                    ? 'All columns and data types are preserved.'
+                                    : getStageData('validation_output').schema_validation.differences?.[0] || 
+                                      `Column count mismatch: Original has ${getStageData('validation_output').schema_validation.original_schema?.column_count} columns, Optimized has ${getStageData('validation_output').schema_validation.optimized_schema?.column_count} columns.`}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500">Performance:</span> 
-                              <span className="font-semibold text-blue-600 ml-1">{getStageData('report').executive_summary.performance_gain}</span>
+                          )}
+                          
+                          {/* Join Conditions Match Check */}
+                          {getStageData('validation_output').join_validation && (
+                            <div className="flex items-start gap-2 text-xs">
+                              {getStageData('validation_output').join_validation.status === 'MATCH' || 
+                               getStageData('validation_output').join_validation.status === 'NOT_APPLICABLE' ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                              ) : (
+                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
+                              )}
+                              <div>
+                                <span className="text-gray-700">Join conditions match</span>
+                                <div className="text-gray-500 mt-0.5">
+                                  {getStageData('validation_output').join_validation.status === 'NOT_APPLICABLE'
+                                    ? 'No joins present in the query.'
+                                    : getStageData('validation_output').join_validation.status === 'MATCH'
+                                      ? 'All join conditions are preserved correctly.'
+                                      : getStageData('validation_output').join_validation.differences?.[0] || 'Join conditions have been modified.'}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500">Data Saved:</span> 
-                              <span className="font-semibold ml-1">{getStageData('report').executive_summary.data_reduction}</span>
+                          )}
+                          
+                          {/* Filter Conditions Match Check */}
+                          {getStageData('validation_output').filter_validation && (
+                            <div className="flex items-start gap-2 text-xs">
+                              {getStageData('validation_output').filter_validation.status === 'MATCH' || 
+                               getStageData('validation_output').filter_validation.status === 'NOT_APPLICABLE' ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                              ) : getStageData('validation_output').filter_validation.status === 'OPTIMIZED' ? (
+                                <FiAlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
+                              ) : (
+                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
+                              )}
+                              <div>
+                                <span className="text-gray-700">Filter conditions match</span>
+                                <div className="text-gray-500 mt-0.5">
+                                  {getStageData('validation_output').filter_validation.status === 'NOT_APPLICABLE'
+                                    ? 'No filter conditions in the query.'
+                                    : getStageData('validation_output').filter_validation.status === 'MATCH'
+                                      ? 'All filter conditions are preserved.'
+                                      : getStageData('validation_output').filter_validation.status === 'OPTIMIZED'
+                                        ? getStageData('validation_output').filter_validation.notes || 'An additional filter was added for performance optimization.'
+                                        : 'Filter conditions have been modified.'}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500">Complexity:</span> 
-                              <span className="ml-1">
-                                {getStageData('report').executive_summary.original_complexity} → {getStageData('report').executive_summary.optimized_complexity}
-                              </span>
+                          )}
+                          
+                          {/* Aggregation Functions Match Check */}
+                          {getStageData('validation_output').aggregation_validation && (
+                            <div className="flex items-start gap-2 text-xs">
+                              {getStageData('validation_output').aggregation_validation.status === 'MATCH' || 
+                               getStageData('validation_output').aggregation_validation.status === 'NOT_APPLICABLE' ? (
+                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                              ) : (
+                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
+                              )}
+                              <div>
+                                <span className="text-gray-700">Aggregation functions match</span>
+                                <div className="text-gray-500 mt-0.5">
+                                  {getStageData('validation_output').aggregation_validation.status === 'NOT_APPLICABLE'
+                                    ? 'No aggregation functions used in the query.'
+                                    : getStageData('validation_output').aggregation_validation.status === 'MATCH'
+                                      ? 'All aggregation functions are preserved.'
+                                      : getStageData('validation_output').aggregation_validation.differences?.[0] || 'Aggregation functions have been modified.'}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {getStageData('report').optimization_summary && (
-                        <div className="bg-blue-50 p-3 rounded">
-                          <div className="text-sm font-semibold mb-2">Optimization Results</div>
-                          <div className="text-xs space-y-1">
-                            <div>
-                              <span className="text-gray-500">Steps Applied:</span> {getStageData('report').optimization_summary.steps_taken}
+                          )}
+                          
+                          {/* Note/Summary */}
+                          {(getStageData('validation_output').recommendation || 
+                            (getStageData('validation_output').validation_details && 
+                             getStageData('validation_output').validation_details.warnings && 
+                             getStageData('validation_output').validation_details.warnings.length > 0)) && (
+                            <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded mt-2">
+                              <span className="font-semibold">Note:</span> {
+                                getStageData('validation_output').validation_details?.warnings?.[0] || 
+                                getStageData('validation_output').recommendation?.substring(0, 200) + '...'
+                              }
                             </div>
-                            <div>
-                              <span className="text-gray-500">Est. Cost Before:</span> {getStageData('report').optimization_summary.estimated_cost_before}
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Est. Cost After:</span> 
-                              <span className="font-semibold text-green-600 ml-1">{getStageData('report').optimization_summary.estimated_cost_after}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {getStageData('report').recommendations && (
-                        <div>
-                          <div className="text-sm font-semibold mb-2">Recommendations</div>
-                          <ul className="text-xs text-gray-600 space-y-1">
-                            {getStageData('report').recommendations.map((rec, idx) => (
-                              <li key={idx} className="flex">
-                                <span className="text-blue-500 mr-2">•</span>
-                                <span>{rec}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {getStageData('report').best_practices && (
-                        <div>
-                          <div className="text-sm font-semibold mb-2">Best Practices</div>
-                          <ul className="text-xs text-gray-600 space-y-1">
-                            {getStageData('report').best_practices.map((practice, idx) => (
-                              <li key={idx} className="flex">
-                                <span className="text-green-500 mr-2">✓</span>
-                                <span>{practice}</span>
-                              </li>
-                            ))}
-                          </ul>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1580,7 +1580,7 @@ const AnalysisResult = () => {
                   {/* JSON view */}
                   {reportView === 'json' && (
                     <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" style={{maxHeight: '400px', overflowY: 'auto'}}>
-                      {JSON.stringify(getStageData('report'), null, 2)}
+                      {JSON.stringify(getStageData('validation_output'), null, 2)}
                     </pre>
                   )}
                 </motion.div>
