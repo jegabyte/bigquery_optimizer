@@ -837,27 +837,6 @@ const AnalysisResult = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={options.rewrite}
-                onChange={(e) => setOptions({ ...options, rewrite: e.target.checked })}
-                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-sm text-gray-700">Rewrite query</span>
-            </label>
-            
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={options.validate}
-                onChange={(e) => setOptions({ ...options, validate: e.target.checked })}
-                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-sm text-gray-700">Validate optimization</span>
-            </label>
-          </div>
 
           <div className="flex gap-2">
             <button

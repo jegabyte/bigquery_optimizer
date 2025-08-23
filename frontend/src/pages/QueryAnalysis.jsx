@@ -26,18 +26,96 @@ const QueryAnalysis = () => {
       const firestoreAnalyses = await getRecentAnalyses({}, 100); // Get up to 100 recent analyses
       
       for (const analysis of firestoreAnalyses) {
+        // Get optimization data from various possible locations
+        const optimizationData = analysis.stage_data?.optimization || 
+                               analysis.stageData?.optimization ||
+                               analysis.result?.metadata?.stages?.optimization ||
+                               analysis.result?.stageData?.optimization ||
+                               analysis.result?.stage_data?.optimization;
+        
+        // Get report data for additional metrics
+        const reportData = analysis.stage_data?.report || 
+                         analysis.stageData?.report ||
+                         analysis.result?.metadata?.stages?.report ||
+                         analysis.result?.stageData?.report ||
+                         analysis.result?.stage_data?.report;
+        
         const analysisData = {
           id: analysis.id || analysis.analysis_id,
           query: analysis.query || analysis.original_query || analysis.result?.query || '',
           timestamp: analysis.timestamp || analysis.created_at || new Date().toISOString(),
           status: analysis.result?.error ? 'error' : 'completed',
-          issues: analysis.issues_found?.length || analysis.result?.issues?.length || 0,
-          costReduction: analysis.savings_percentage ? `${analysis.savings_percentage}%` :
-                         analysis.result?.metadata?.stages?.report?.executive_summary?.cost_reduction || 
-                         (analysis.result?.validationResult?.costSavings ? `${analysis.result.validationResult.costSavings}%` : '0%'),
+          issues: (() => {
+            // Check rule analysis stage for violations
+            const ruleAnalysis = analysis.stage_data?.rules || 
+                               analysis.stageData?.rules ||
+                               analysis.stage_data?.rule_analysis ||
+                               analysis.stageData?.rule_analysis ||
+                               analysis.result?.metadata?.stages?.rules ||
+                               analysis.result?.metadata?.stages?.rule_analysis;
+            
+            if (ruleAnalysis?.violations_found !== undefined) {
+              return ruleAnalysis.violations_found;
+            }
+            if (ruleAnalysis?.total_issues !== undefined) {
+              return ruleAnalysis.total_issues;
+            }
+            
+            // Fallback to other sources
+            return analysis.issues_found?.length || analysis.result?.issues?.length || 0;
+          })(),
+          costReduction: (() => {
+            // Check optimization data first
+            if (optimizationData?.performance_improvement?.percentage_reduction !== undefined) {
+              return `${Math.round(optimizationData.performance_improvement.percentage_reduction)}%`;
+            }
+            // Check for cost_saved_usd and calculate percentage
+            if (optimizationData?.performance_improvement?.cost_saved_usd && 
+                optimizationData?.original_metrics?.estimated_cost_usd) {
+              const percentage = (optimizationData.performance_improvement.cost_saved_usd / 
+                                optimizationData.original_metrics.estimated_cost_usd) * 100;
+              return `${Math.round(percentage)}%`;
+            }
+            // Check report data
+            if (reportData?.optimization_summary?.percentage_reduction !== undefined) {
+              return `${Math.round(reportData.optimization_summary.percentage_reduction)}%`;
+            }
+            if (reportData?.executive_summary?.cost_reduction) {
+              const costReductionStr = reportData.executive_summary.cost_reduction;
+              // Extract percentage from string like "45% reduction"
+              const match = costReductionStr.match(/(\d+)%/);
+              if (match) {
+                return `${match[1]}%`;
+              }
+            }
+            // Fallback to other sources
+            if (analysis.savings_percentage) {
+              return `${analysis.savings_percentage}%`;
+            }
+            return '0%';
+          })(),
           optimized: analysis.optimization_applied || !!analysis.optimized_query || !!analysis.result?.optimizedQuery,
-          performance: analysis.result?.metadata?.stages?.report?.executive_summary?.performance_improvement || 
-                      analysis.result?.metadata?.stages?.report?.executive_summary?.performance_gain || 'N/A',
+          performance: (() => {
+            // Check for performance_improvement.percentage_reduction
+            if (optimizationData?.performance_improvement?.percentage_reduction !== undefined) {
+              return `${Math.round(optimizationData.performance_improvement.percentage_reduction)}% reduction`;
+            }
+            // Check for bytes saved
+            if (optimizationData?.performance_improvement?.bytes_saved_formatted) {
+              return `${optimizationData.performance_improvement.bytes_saved_formatted} saved`;
+            }
+            // Check report data
+            if (reportData?.optimization_summary?.bytes_saved_formatted) {
+              return `${reportData.optimization_summary.bytes_saved_formatted} saved`;
+            }
+            if (reportData?.executive_summary?.data_reduction) {
+              return reportData.executive_summary.data_reduction;
+            }
+            if (reportData?.executive_summary?.performance_improvement) {
+              return reportData.executive_summary.performance_improvement;
+            }
+            return 'N/A';
+          })(),
           dataReduction: analysis.result?.metadata?.stages?.report?.executive_summary?.data_reduction || 'N/A',
           source: 'bigquery'
         };

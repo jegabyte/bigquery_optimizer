@@ -157,6 +157,7 @@ class AnalysisResult(BaseModel):
     options: Optional[Dict[str, Any]] = {}
     result: Dict[str, Any]
     stage_data: Optional[Dict[str, Any]] = {}
+    stageData: Optional[Dict[str, Any]] = {}  # Also accept camelCase from frontend
     timestamp: Optional[str] = None
     project_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -633,12 +634,15 @@ async def delete_project(project_id: str):
 async def save_analysis(analysis: AnalysisResult):
     """Save an analysis result to Firestore"""
     try:
-        # Prepare analysis data
+        # Prepare analysis data - handle both stageData and stage_data
+        stage_data = analysis.stage_data or analysis.stageData or {}
+        
         analysis_data = {
             "query": analysis.query,
             "options": analysis.options or {},
             "result": analysis.result,
-            "stage_data": analysis.stage_data or {},
+            "stage_data": stage_data,
+            "stageData": stage_data,  # Save with both naming conventions
             "timestamp": analysis.timestamp or datetime.utcnow().isoformat(),
             "project_id": analysis.project_id,
             "user_id": analysis.user_id or "anonymous"
