@@ -6,6 +6,7 @@ import {
   FiChevronLeft,
   FiCheck,
   FiAlertTriangle,
+  FiAlertCircle,
   FiCheckCircle,
   FiXCircle,
   FiLoader
@@ -326,7 +327,21 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
 
       const projectResult = await createResponse.json();
       
-      toast.success('Project created! Running analysis in background...');
+      toast.success(
+        <div>
+          <div>Project created! Running analysis in background...</div>
+          <div style={{ marginTop: '8px', fontSize: '0.875rem', fontStyle: 'italic' }}>
+            <strong>Note:</strong> Please grant the required BigQuery permissions to your service account for analysis to work properly:
+            <ul style={{ marginLeft: '16px', marginTop: '4px' }}>
+              <li>• bigquery.jobs.create</li>
+              <li>• bigquery.tables.get</li>
+              <li>• bigquery.tables.getData</li>
+              <li>• bigquery.datasets.get</li>
+            </ul>
+          </div>
+        </div>,
+        { duration: 8000 }
+      );
       onComplete(projectResult);
       onClose();
 
@@ -1060,6 +1075,48 @@ const ProjectOnboarding = ({ isOpen, onClose, onComplete }) => {
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-6">
                 {renderStepContent()}
+                
+                {/* Service Account Permission Note - Show on validation step when successful */}
+                {currentStep === 2 && validationResult?.success && (
+                  <div className="mt-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                    <div className="flex items-start">
+                      <FiAlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                          Important: Service Account Permissions Required
+                        </p>
+                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-2">
+                          After creating the project, ensure your service account has the following BigQuery permissions for the analysis to work properly:
+                        </p>
+                        <ul className="text-sm text-amber-600 dark:text-amber-400 mt-2 space-y-1">
+                          <li className="flex items-center">
+                            <span className="mr-2">•</span>
+                            <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">bigquery.jobs.create</code>
+                            <span className="ml-2 text-xs">(to run analysis queries)</span>
+                          </li>
+                          <li className="flex items-center">
+                            <span className="mr-2">•</span>
+                            <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">bigquery.tables.get</code>
+                            <span className="ml-2 text-xs">(to access table metadata)</span>
+                          </li>
+                          <li className="flex items-center">
+                            <span className="mr-2">•</span>
+                            <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">bigquery.tables.getData</code>
+                            <span className="ml-2 text-xs">(to read table data)</span>
+                          </li>
+                          <li className="flex items-center">
+                            <span className="mr-2">•</span>
+                            <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">bigquery.datasets.get</code>
+                            <span className="ml-2 text-xs">(to access dataset information)</span>
+                          </li>
+                        </ul>
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
+                          These permissions can be granted through the BigQuery Data Viewer or BigQuery Job User roles in Google Cloud IAM.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}

@@ -311,19 +311,12 @@ check_prerequisites() {
         echo "  - europe-west (Belgium)"
         echo "  - asia-northeast1 (Tokyo)"
         echo ""
-        read -p "Initialize App Engine now? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            read -p "Enter region (e.g., us-central): " APP_REGION
-            gcloud app create --region=$APP_REGION --project=$GCP_PROJECT_ID
-            if [ $? -eq 0 ]; then
-                print_success "App Engine initialized"
-            else
-                print_error "Failed to initialize App Engine"
-                checks_passed=false
-            fi
+        print_info "Auto-initializing App Engine in us-central region..."
+        gcloud app create --region=us-central --project=$GCP_PROJECT_ID --quiet
+        if [ $? -eq 0 ]; then
+            print_success "App Engine initialized"
         else
-            print_error "App Engine must be initialized to continue"
+            print_error "Failed to initialize App Engine"
             checks_passed=false
         fi
     else
@@ -1040,14 +1033,9 @@ main() {
         gcloud config set project $GCP_PROJECT_ID --quiet
     fi
     
-    # Confirm deployment
+    # Skip deployment confirmation - automatically proceed
     echo ""
-    read -p "Proceed with deployment? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Deployment cancelled"
-        exit 0
-    fi
+    print_info "Starting deployment..."
     
     # Start deployment
     START_TIME=$(date +%s)
