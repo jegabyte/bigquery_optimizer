@@ -120,18 +120,45 @@ pip install -r requirements.txt
 ```
 
 4. **Set up environment variables:**
-```bash
-# Copy the example environment file
-cp .env.example .env
 
-# Edit .env with your configuration
-export GCP_PROJECT_ID=your-project-id
-export BQ_PROJECT_ID=your-project-id
-export BQ_DATASET=bq_optimizer
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-export VERTEX_AI_PROJECT=your-project-id
-export VERTEX_AI_LOCATION=us-central1
+For detailed Agent API configuration, see [AGENT_API_DEPLOYMENT.md](./AGENT_API_DEPLOYMENT.md)
+
+```bash
+# Create .env file in project root
+cat > .env << 'EOF'
+# Google Cloud Core (REQUIRED)
+GCP_PROJECT_ID=your-project-id
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+
+# Authentication (choose one)
+# Option 1: Service Account Key
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+# Option 2: Run 'gcloud auth application-default login'
+
+# Vertex AI Configuration (REQUIRED for Agent API)
+GOOGLE_GENAI_USE_VERTEXAI=True
+VERTEX_AI_PROJECT=your-project-id
+VERTEX_AI_LOCATION=us-central1
+
+# BigQuery Configuration
+BQ_PROJECT_ID=your-project-id
+BQ_DATASET=bq_optimizer
+BQ_LOCATION=US
+
+# API URLs
+BACKEND_API_URL=http://localhost:8000
+AGENT_API_URL=http://localhost:8001
+EOF
+
+# Edit .env with your actual values
+nano .env
 ```
+
+**Important:** The Agent API requires Vertex AI to be configured. If you get "project and location must be set" errors, ensure:
+1. `GCP_PROJECT_ID` and `GOOGLE_CLOUD_LOCATION` are set
+2. You have authenticated (service account or `gcloud auth application-default login`)
+3. Required APIs are enabled (aiplatform.googleapis.com, bigquery.googleapis.com)
 
 ### Running Locally
 
@@ -144,10 +171,17 @@ chmod +x deploy_local.sh
 # Run all services
 ./deploy_local.sh
 
-# Or run specific services
-./deploy_local.sh --service frontend
-./deploy_local.sh --service agent-api
-./deploy_local.sh --service backend-api
+# Or run specific services (foreground with logs)
+./deploy_local.sh agent-api      # Start only Agent API
+./deploy_local.sh backend-api    # Start only Backend API  
+./deploy_local.sh frontend       # Start only Frontend
+
+# Stop all services
+./deploy_local.sh stop
+
+# Use different backend storage
+./deploy_local.sh --backend=firestore  # Use Firestore (default)
+./deploy_local.sh --backend=bigquery   # Use BigQuery tables
 ```
 
 Services will be available at:
