@@ -1621,7 +1621,7 @@ const AnalysisResult = () => {
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-purple-600">
-                    ${(getStageData('optimization').performance_improvement.cost_saved_usd || 0).toFixed(4)}
+                    ${(getStageData('optimization').performance_improvement.cost_saved_usd || 0).toFixed(2)}
                   </div>
                   <div className="text-sm text-gray-600">Expected Cost Saving</div>
                 </div>
