@@ -324,18 +324,7 @@ check_prerequisites() {
         print_success "App Engine initialized in region: $APP_REGION"
     fi
     
-    # 9. Check billing
-    print_info "Checking billing account..."
-    BILLING_ENABLED=$(gcloud beta billing projects describe $GCP_PROJECT_ID --format="value(billingEnabled)" 2>/dev/null || echo "false")
-    if [ "$BILLING_ENABLED" != "True" ]; then
-        print_error "Billing is not enabled for project $GCP_PROJECT_ID"
-        echo "   Enable at: https://console.cloud.google.com/billing"
-        checks_passed=false
-    else
-        print_success "Billing enabled"
-    fi
-    
-    # 10. Validate backend type
+    # 9. Validate backend type
     print_info "Validating backend type..."
     if [[ "$BACKEND_TYPE" != "bigquery" && "$BACKEND_TYPE" != "firestore" ]]; then
         print_error "Invalid backend type: $BACKEND_TYPE"
