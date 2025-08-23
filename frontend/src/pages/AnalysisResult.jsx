@@ -629,7 +629,7 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Stage 2: Rule Analysis Agent */}
+            {/* Stage 2: Query Anti Pattern Analysis Agent */}
             <div>
               <button
                 onClick={() => stageData.rules && setSelectedStage(selectedStage === 'rules' ? null : 'rules')}
@@ -652,7 +652,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!stageData.rules && currentStep !== 1 ? 'text-gray-400' : ''}`}>
-                      Rule Analysis Agent
+                      Query Anti Pattern Analysis Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">

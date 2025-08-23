@@ -5,7 +5,7 @@ import { FiCheck, FiLoader, FiDatabase, FiSearch, FiEdit3, FiCheckCircle } from 
 const CompactProgressStepper = ({ currentStep, steps, status }) => {
   const defaultSteps = [
     { id: 'metadata', name: 'Metadata Agent', icon: FiDatabase },
-    { id: 'analysis', name: 'Rule Analysis Agent', icon: FiSearch },
+    { id: 'analysis', name: 'Query Anti Pattern Analysis Agent', icon: FiSearch },
     { id: 'optimization', name: 'Optimization Agent', icon: FiEdit3 },
     { id: 'validation', name: 'Summary Agent', icon: FiCheckCircle },
   ];

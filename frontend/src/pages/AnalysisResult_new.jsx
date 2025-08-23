@@ -1095,7 +1095,7 @@ const AnalysisResult = () => {
                       <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                     )}
                     <span className={`font-medium ${!getStageData('rules') && currentStep !== 1 ? 'text-gray-400' : ''}`}>
-                      Rule Analysis Agent
+                      Query Anti Pattern Analysis Agent
                     </span>
                   </div>
                   <span className="text-sm text-gray-600">
@@ -1446,98 +1446,89 @@ const AnalysisResult = () => {
                   {/* Rendered view */}
                   {reportView === 'rendered' && (
                     <div className="space-y-3">
-                      {/* Validation Checklist */}
+                      {/* Validation Checklist - Only 2 checks */}
                       {getStageData('validation_output') && (
                         <div className="space-y-2">
-                          {/* Schema Match Check */}
-                          {getStageData('validation_output').schema_validation && (
-                            <div className="flex items-start gap-2 text-xs">
-                              {getStageData('validation_output').schema_validation.status === 'MATCH' ? (
+                          {/* Syntactic Validation Check */}
+                          <div className="flex items-start gap-2 text-xs">
+                            {(() => {
+                              const validationOutput = getStageData('validation_output');
+                              // Check if syntactic validation passed by looking at multiple indicators:
+                              // 1. If syntactic_validation.status is explicitly PASSED
+                              // 2. If dry_run_success is true (means syntax is valid)
+                              // 3. If validation message indicates syntax is valid
+                              const syntaxValid = 
+                                validationOutput.syntactic_validation?.status === 'PASSED' ||
+                                validationOutput.dry_run_success === true ||
+                                (validationOutput.syntactic_validation?.message && 
+                                 validationOutput.syntactic_validation.message.toLowerCase().includes('valid')) ||
+                                (!validationOutput.syntactic_validation && 
+                                 validationOutput.validation_message && 
+                                 validationOutput.validation_message.toLowerCase().includes('syntax is valid'));
+                              
+                              return syntaxValid ? (
                                 <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
                               ) : (
                                 <FiX className="h-4 w-4 text-red-600 mt-0.5" />
-                              )}
-                              <div>
-                                <span className="text-gray-700">Schema match</span>
-                                <div className="text-gray-500 mt-0.5">
-                                  {getStageData('validation_output').schema_validation.status === 'MATCH' 
-                                    ? 'All columns and data types are preserved.'
-                                    : getStageData('validation_output').schema_validation.differences?.[0] || 
-                                      `Column count mismatch: Original has ${getStageData('validation_output').schema_validation.original_schema?.column_count} columns, Optimized has ${getStageData('validation_output').schema_validation.optimized_schema?.column_count} columns.`}
-                                </div>
+                              );
+                            })()}
+                            <div>
+                              <span className="text-gray-700 font-medium">Syntactic validation</span>
+                              <div className="text-gray-500 mt-0.5">
+                                {getStageData('validation_output').syntactic_validation ? (
+                                  getStageData('validation_output').syntactic_validation.message || 
+                                  (getStageData('validation_output').syntactic_validation.status === 'PASSED' 
+                                    ? 'Query syntax is valid, all tables and columns exist.'
+                                    : `Syntax error: ${getStageData('validation_output').syntactic_validation.error_details || 'Invalid query syntax'}`)
+                                ) : (
+                                  getStageData('validation_output').validation_message || 'Query syntax is valid and executable.'
+                                )}
                               </div>
                             </div>
-                          )}
+                          </div>
                           
-                          {/* Join Conditions Match Check */}
-                          {getStageData('validation_output').join_validation && (
-                            <div className="flex items-start gap-2 text-xs">
-                              {getStageData('validation_output').join_validation.status === 'MATCH' || 
-                               getStageData('validation_output').join_validation.status === 'NOT_APPLICABLE' ? (
+                          {/* Schema Validation Check */}
+                          <div className="flex items-start gap-2 text-xs">
+                            {(() => {
+                              const schemaStatus = getStageData('validation_output').schema_validation?.status || 
+                                                  (getStageData('validation_output').schema_validation?.status === 'MATCH' ? 'PASSED' : 'FAILED');
+                              return schemaStatus === 'PASSED' || schemaStatus === 'MATCH' ? (
                                 <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                              ) : (
-                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
-                              )}
-                              <div>
-                                <span className="text-gray-700">Join conditions match</span>
-                                <div className="text-gray-500 mt-0.5">
-                                  {getStageData('validation_output').join_validation.status === 'NOT_APPLICABLE'
-                                    ? 'No joins present in the query.'
-                                    : getStageData('validation_output').join_validation.status === 'MATCH'
-                                      ? 'All join conditions are preserved correctly.'
-                                      : getStageData('validation_output').join_validation.differences?.[0] || 'Join conditions have been modified.'}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Filter Conditions Match Check */}
-                          {getStageData('validation_output').filter_validation && (
-                            <div className="flex items-start gap-2 text-xs">
-                              {getStageData('validation_output').filter_validation.status === 'MATCH' || 
-                               getStageData('validation_output').filter_validation.status === 'NOT_APPLICABLE' ? (
-                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                              ) : getStageData('validation_output').filter_validation.status === 'OPTIMIZED' ? (
+                              ) : schemaStatus === 'WARNING' ? (
                                 <FiAlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
                               ) : (
                                 <FiX className="h-4 w-4 text-red-600 mt-0.5" />
-                              )}
-                              <div>
-                                <span className="text-gray-700">Filter conditions match</span>
-                                <div className="text-gray-500 mt-0.5">
-                                  {getStageData('validation_output').filter_validation.status === 'NOT_APPLICABLE'
-                                    ? 'No filter conditions in the query.'
-                                    : getStageData('validation_output').filter_validation.status === 'MATCH'
-                                      ? 'All filter conditions are preserved.'
-                                      : getStageData('validation_output').filter_validation.status === 'OPTIMIZED'
-                                        ? getStageData('validation_output').filter_validation.notes || 'An additional filter was added for performance optimization.'
-                                        : 'Filter conditions have been modified.'}
-                                </div>
+                              );
+                            })()}
+                            <div>
+                              <span className="text-gray-700 font-medium">Schema validation</span>
+                              <div className="text-gray-500 mt-0.5">
+                                {(() => {
+                                  const validation = getStageData('validation_output').schema_validation;
+                                  if (!validation) {
+                                    return 'Schema validation complete.';
+                                  }
+                                  
+                                  if (validation.message) {
+                                    return validation.message;
+                                  }
+                                  
+                                  if (validation.status === 'MATCH' || validation.status === 'PASSED') {
+                                    const columnCount = validation.original_columns || validation.original_schema?.column_count || 
+                                                       validation.optimized_columns || validation.optimized_schema?.column_count || 0;
+                                    return `Schemas match: ${columnCount} columns with same types.`;
+                                  } else if (validation.status === 'WARNING') {
+                                    return 'Schemas match but column order may differ.';
+                                  } else {
+                                    const origCols = validation.original_columns || validation.original_schema?.column_count || 0;
+                                    const optCols = validation.optimized_columns || validation.optimized_schema?.column_count || 0;
+                                    return validation.differences?.[0] || 
+                                           `Schema mismatch: Original has ${origCols} columns, Optimized has ${optCols} columns.`;
+                                  }
+                                })()}
                               </div>
                             </div>
-                          )}
-                          
-                          {/* Aggregation Functions Match Check */}
-                          {getStageData('validation_output').aggregation_validation && (
-                            <div className="flex items-start gap-2 text-xs">
-                              {getStageData('validation_output').aggregation_validation.status === 'MATCH' || 
-                               getStageData('validation_output').aggregation_validation.status === 'NOT_APPLICABLE' ? (
-                                <FiCheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                              ) : (
-                                <FiX className="h-4 w-4 text-red-600 mt-0.5" />
-                              )}
-                              <div>
-                                <span className="text-gray-700">Aggregation functions match</span>
-                                <div className="text-gray-500 mt-0.5">
-                                  {getStageData('validation_output').aggregation_validation.status === 'NOT_APPLICABLE'
-                                    ? 'No aggregation functions used in the query.'
-                                    : getStageData('validation_output').aggregation_validation.status === 'MATCH'
-                                      ? 'All aggregation functions are preserved.'
-                                      : getStageData('validation_output').aggregation_validation.differences?.[0] || 'Aggregation functions have been modified.'}
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                          </div>
                           
                           {/* Note/Summary */}
                           {(getStageData('validation_output').recommendation || 

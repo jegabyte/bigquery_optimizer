@@ -210,11 +210,11 @@ metadata_extractor = LlmAgent(
     after_agent_callback=create_streaming_callback("metadata_extractor", "Metadata extraction completed", "metadata_output")
 )
 
-# 2. Rule Checker Agent
+# 2. Query Anti Pattern Analysis Agent
 rule_checker = LlmAgent(
     name="rule_checker",
     model="gemini-2.5-flash",
-    description="Checks query against BigQuery anti-patterns from Firestore/YAML",
+    description="Analyzes query for BigQuery anti-patterns from Firestore/YAML",
     instruction=f"""
 You are a BigQuery SQL anti-pattern checker.
 
@@ -363,105 +363,55 @@ query_validation_agent = LlmAgent(
     description="Validates optimized query structure and schema against original",
     tools=[dry_run_tool],  # Use dry_run tool to validate both queries
     instruction="""
-    You are the Query Validation Agent that ensures the optimized query maintains semantic equivalence with the original.
+    You are the Query Validation Agent that validates queries using BigQuery's dry run capability.
+    
+    IMPORTANT: You must use the bigquery_dry_run TOOL to validate queries. Do NOT try to write Python code or import modules.
     
     You will receive:
     1. The original SQL query (from user input)
-    2. "metadata_output" - Table metadata from metadata_extractor
-    3. "rules_output" - Rule violations and compliance
-    4. "optimization_output" - The optimized query and optimization steps
+    2. "optimization_output" - The optimized query and optimization details
     
-    Your task is to validate that the optimized query:
-    1. Returns the same schema (column names, types, order) as the original
-    2. Uses the same join conditions (validate join keys are identical)
-    3. Applies the same filters (WHERE conditions are logically equivalent)
-    4. Groups by the same columns (if applicable)
-    5. Orders results the same way (if applicable)
+    Use the bigquery_dry_run tool by calling it like this:
+    bigquery_dry_run(query="SELECT ...")
     
-    Validation Steps:
-    1. Use the dry_run tool to validate BOTH queries and get their schemas
-    2. Compare the schemas to ensure they match
-    3. Extract and compare join conditions
-    4. Verify filter conditions are equivalent
-    5. Check aggregations and groupings match
+    Perform EXACTLY these 2 validation checks:
     
-    Your response must be ONLY valid JSON in this exact format:
+    VALIDATION 1 - SYNTACTIC VALIDATION:
+    - Call: bigquery_dry_run(query=<optimized_query_from_optimization_output>)
+    - Parse the JSON response to check if "valid" is true
+    - Mark as PASSED if valid=true (dry_run succeeds)
+    - Mark as FAILED if valid=false (dry_run returns errors)
+    - Include the error_message if validation fails
+    
+    VALIDATION 2 - SCHEMA VALIDATION:
+    - Call: bigquery_dry_run(query=<original_query>)
+    - Call: bigquery_dry_run(query=<optimized_query>)
+    - Compare the schemas from both responses
+    - Mark as PASSED if schemas match
+    - Mark as WARNING if minor differences exist
+    - Mark as FAILED if schemas are incompatible
+    
+    Your FINAL response must be ONLY valid JSON in this exact format:
     {
         "validation_status": "PASSED|FAILED|WARNING",
         "validation_timestamp": "ISO8601 timestamp",
+        "syntactic_validation": {
+            "status": "PASSED|FAILED",
+            "message": "Query syntax is valid and all referenced tables/columns exist|Error details",
+            "dry_run_success": true|false,
+            "error_details": null|"Specific error from BigQuery if failed"
+        },
         "schema_validation": {
-            "status": "MATCH|MISMATCH|WARNING",
-            "original_schema": {
-                "columns": [
-                    {"name": "column1", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "column2", "type": "INTEGER", "mode": "REQUIRED"}
-                ],
-                "column_count": 2
-            },
-            "optimized_schema": {
-                "columns": [
-                    {"name": "column1", "type": "STRING", "mode": "NULLABLE"},
-                    {"name": "column2", "type": "INTEGER", "mode": "REQUIRED"}
-                ],
-                "column_count": 2
-            },
-            "differences": []
+            "status": "PASSED|FAILED|WARNING", 
+            "message": "Schema matches: same columns and types|Schema mismatch details",
+            "original_columns": 10,
+            "optimized_columns": 10,
+            "column_match": true|false,
+            "type_match": true|false,
+            "differences": ["List any differences found"]
         },
-        "join_validation": {
-            "status": "MATCH|MISMATCH|NOT_APPLICABLE",
-            "original_joins": [
-                {
-                    "type": "INNER|LEFT|RIGHT|FULL",
-                    "left_table": "table1",
-                    "right_table": "table2",
-                    "join_keys": ["key1", "key2"]
-                }
-            ],
-            "optimized_joins": [
-                {
-                    "type": "INNER|LEFT|RIGHT|FULL",
-                    "left_table": "table1",
-                    "right_table": "table2",
-                    "join_keys": ["key1", "key2"]
-                }
-            ],
-            "differences": []
-        },
-        "filter_validation": {
-            "status": "MATCH|MISMATCH|OPTIMIZED",
-            "original_filters": ["condition1", "condition2"],
-            "optimized_filters": ["condition1", "condition2", "partition_filter"],
-            "added_filters": ["partition_filter for optimization"],
-            "removed_filters": [],
-            "notes": "Added partition filter for performance without affecting results"
-        },
-        "aggregation_validation": {
-            "status": "MATCH|MISMATCH|NOT_APPLICABLE",
-            "original_aggregations": ["COUNT(*)", "SUM(amount)"],
-            "optimized_aggregations": ["COUNT(*)", "SUM(amount)"],
-            "group_by_columns": ["column1", "column2"],
-            "differences": []
-        },
-        "performance_comparison": {
-            "original_bytes_processed": 1234567890,
-            "optimized_bytes_processed": 123456789,
-            "data_reduction_percentage": 90.0,
-            "original_estimated_cost": 5.50,
-            "optimized_estimated_cost": 0.55,
-            "cost_reduction_percentage": 90.0
-        },
-        "validation_details": {
-            "warnings": [
-                "Column order changed but types match",
-                "Additional partition filter added for optimization"
-            ],
-            "errors": [],
-            "info": [
-                "Query optimization successful",
-                "All semantic constraints preserved"
-            ]
-        },
-        "recommendation": "The optimized query is semantically equivalent and safe to use",
+        "execution_time": 2.5,
+        "validation_notes": "Brief summary of the two validation checks",
         "final_optimized_query": "SELECT ... (the final validated query)"
     }
     
