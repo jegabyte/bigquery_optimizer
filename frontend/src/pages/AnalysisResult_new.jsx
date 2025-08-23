@@ -7,6 +7,21 @@ import toast from 'react-hot-toast';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
 import { optimizeQueryWithADK, testADKConnection } from '../services/adk';
 import { saveAnalysisToFirestore, getAnalysisFromFirestore, isFirestoreAvailable } from '../services/analysisService';
+import { validateQuery, formatErrorMessage, getErrorTypeDisplay } from '../services/queryValidationService';
+
+// Utility functions
+const formatCost = (cost) => {
+  if (!cost || cost === 0) return '$0.00';
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+};
+
+const formatBytes = (bytes) => {
+  if (!bytes || bytes === 0) return '0 B';
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+};
 
 // BigQuery-style SQL Formatter
 const formatSQL = (sql) => {
@@ -177,6 +192,9 @@ const AnalysisResult = () => {
   const [reportView, setReportView] = useState('rendered');
   const [copied, setCopied] = useState(false);
   const [copiedStage, setCopiedStage] = useState(null);
+  
+  // Validation error state
+  const [validationError, setValidationError] = useState(null);
 
   // Helper to get stage data from either stageData or result.metadata.stages
   const getStageData = (stageName) => {
@@ -328,12 +346,85 @@ const AnalysisResult = () => {
       return;
     }
 
+    // Clear any previous validation errors
+    setValidationError(null);
+    
     setLoading(true);
-    setShowProgress(true);
+    setShowProgress(false); // Don't show progress initially
     setCurrentStep(0);
-    setAnalysisStatus('analyzing');
+    setAnalysisStatus('validating');
     setStageData({});
     setBackendStatus(null);
+    
+    // Step 1: Validate the query first
+    try {
+      toast.loading('Validating query...', { id: 'validation' });
+      
+      const validationResult = await validateQuery(query, options.projectId);
+      
+      if (!validationResult.valid) {
+        toast.dismiss('validation');
+        
+        // Set validation error to display below query
+        setValidationError({
+          type: validationResult.error_type,
+          message: formatErrorMessage(validationResult.error),
+          typeDisplay: getErrorTypeDisplay(validationResult.error_type)
+        });
+        
+        setLoading(false);
+        setAnalysisStatus('error');
+        return;
+      }
+      
+      // Clear validation error if query is valid
+      setValidationError(null);
+      
+      // Check for cost warnings (optional)
+      if (validationResult.validation_details && validationResult.validation_details.estimated_cost > 100) {
+        const shouldContinue = window.confirm(
+          `This query may cost approximately $${validationResult.validation_details.estimated_cost.toFixed(2)} to run.\n\nDo you want to continue?`
+        );
+        
+        if (!shouldContinue) {
+          toast.dismiss('validation');
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // Show validation success with details
+      toast.success(
+        <div>
+          <div>Query validated successfully!</div>
+          {validationResult.validation_details && (
+            <div className="text-sm mt-1 opacity-90">
+              Will process: {validationResult.validation_details.formatted_bytes || 'Unknown size'}
+              {validationResult.validation_details.estimated_cost > 0 && 
+                ` (Est. cost: $${validationResult.validation_details.estimated_cost.toFixed(4)})`
+              }
+            </div>
+          )}
+        </div>,
+        { id: 'validation', duration: 3000 }
+      );
+      
+      // Now show progress after successful validation
+      setShowProgress(true);
+      
+      // Store validation details for display
+      setStageData(prev => ({
+        ...prev,
+        validation: validationResult.validation_details
+      }));
+      
+    } catch (validationError) {
+      toast.dismiss('validation');
+      console.error('Validation error:', validationError);
+      toast.error('Failed to validate query. Proceeding with optimization anyway.', { duration: 3000 });
+    }
+    
+    setAnalysisStatus('analyzing');
     
     // Scroll to Agentic Workflow Stages section
     setTimeout(() => {
@@ -712,7 +803,13 @@ const AnalysisResult = () => {
                 height="300px"
                 defaultLanguage="sql"
                 value={query}
-                onChange={setQuery}
+                onChange={(value) => {
+                  setQuery(value);
+                  // Clear validation error when user modifies query
+                  if (validationError) {
+                    setValidationError(null);
+                  }
+                }}
                 theme="vs-light"
                 options={{
                   minimap: { enabled: false },
@@ -723,6 +820,21 @@ const AnalysisResult = () => {
                 }}
               />
             </div>
+            
+            {/* Validation Error Display */}
+            {validationError && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md flex items-start gap-2">
+                <FiAlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <h4 className="text-sm font-medium text-red-800">
+                    {validationError.typeDisplay}
+                  </h4>
+                  <p className="text-sm text-red-700 mt-1">
+                    {validationError.message}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">

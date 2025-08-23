@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 from google.oauth2 import service_account
+from google.api_core import exceptions as google_exceptions
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import hashlib
@@ -1015,6 +1016,100 @@ async def validate_access(request: Dict[str, Any]):
             }
     except Exception as e:
         logger.error(f"Error validating access: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query/validate")
+async def validate_query(request: Dict[str, Any]):
+    """Validate a SQL query using BigQuery dry run"""
+    if not bq_client:
+        raise HTTPException(status_code=503, detail="BigQuery client not initialized")
+    
+    try:
+        query = request.get("query", "").strip()
+        project_id = request.get("project_id", Config.BQ_PROJECT_ID)
+        
+        if not query:
+            return {
+                "valid": False,
+                "error": "Query is empty",
+                "error_type": "EMPTY_QUERY"
+            }
+        
+        # Configure dry run
+        job_config = bigquery.QueryJobConfig(
+            dry_run=True,
+            use_query_cache=False,
+            default_dataset=f"{project_id}.{Config.BQ_DATASET}" if project_id else None
+        )
+        
+        try:
+            # Run dry run to validate query
+            query_job = bq_client.query(query, job_config=job_config)
+            
+            # Extract information from dry run
+            total_bytes_processed = query_job.total_bytes_processed or 0
+            total_bytes_billed = query_job.total_bytes_billed or 0
+            
+            # Get referenced tables
+            referenced_tables = []
+            if hasattr(query_job, 'referenced_tables') and query_job.referenced_tables:
+                for table_ref in query_job.referenced_tables:
+                    referenced_tables.append({
+                        "project_id": table_ref.project,
+                        "dataset_id": table_ref.dataset_id,
+                        "table_id": table_ref.table_id,
+                        "full_id": f"{table_ref.project}.{table_ref.dataset_id}.{table_ref.table_id}"
+                    })
+            
+            # Calculate estimated cost (BigQuery pricing: $5 per TB)
+            estimated_cost = (total_bytes_billed / (1024**4)) * 5.00
+            
+            return {
+                "valid": True,
+                "query": query,
+                "validation_details": {
+                    "total_bytes_processed": total_bytes_processed,
+                    "total_bytes_billed": total_bytes_billed,
+                    "estimated_cost": round(estimated_cost, 4),
+                    "referenced_tables": referenced_tables,
+                    "will_use_cache": False,  # We set use_query_cache=False
+                    "formatted_bytes": f"{total_bytes_processed / (1024**3):.2f} GB" if total_bytes_processed > 0 else "0 GB"
+                },
+                "message": f"Query is valid. Will process {total_bytes_processed / (1024**3):.2f} GB (${estimated_cost:.4f})"
+            }
+            
+        except (google_exceptions.BadRequest, google_exceptions.NotFound) as e:
+            # Parse BigQuery error for better error messages
+            error_message = str(e)
+            error_type = "SYNTAX_ERROR"
+            
+            if "not found" in error_message.lower() or "dataset" in error_message.lower():
+                error_type = "TABLE_NOT_FOUND"
+            elif "syntax error" in error_message.lower():
+                error_type = "SYNTAX_ERROR"
+            elif "permission" in error_message.lower() or "access denied" in error_message.lower():
+                error_type = "PERMISSION_DENIED"
+            elif "exceeded" in error_message.lower():
+                error_type = "RESOURCE_EXCEEDED"
+                
+            return {
+                "valid": False,
+                "error": error_message,
+                "error_type": error_type,
+                "query": query
+            }
+            
+        except Exception as e:
+            logger.error(f"Unexpected error during query validation: {e}", exc_info=True)
+            return {
+                "valid": False,
+                "error": f"Unexpected error: {str(e)}",
+                "error_type": "UNKNOWN_ERROR",
+                "query": query
+            }
+            
+    except Exception as e:
+        logger.error(f"Error validating query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/projects/scan-information-schema")
