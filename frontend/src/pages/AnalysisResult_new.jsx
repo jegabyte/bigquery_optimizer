@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { mockOptimizationService, createProgressTracker } from '../services/mockData';
 import { optimizeQueryWithADK, testADKConnection } from '../services/adk';
 import { saveAnalysisToFirestore, getAnalysisFromFirestore, isFirestoreAvailable } from '../services/analysisService';
-import { validateQuery, formatErrorMessage, getErrorTypeDisplay } from '../services/queryValidationService';
+// Removed query validation service - validation now handled by agent workflow
 
 // Utility functions
 const formatCost = (cost) => {
@@ -372,57 +372,13 @@ const AnalysisResult = () => {
     setValidationError(null);
     
     setLoading(true);
-    setShowProgress(false); // Don't show progress initially
+    setShowProgress(true); // Show progress immediately
     setCurrentStep(0);
-    setAnalysisStatus('validating');
+    setAnalysisStatus('analyzing'); // Skip validation status
     setStageData({});
     setBackendStatus(null);
     
-    // Step 1: Validate the query first
-    try {
-      const validationResult = await validateQuery(query, options.projectId);
-      
-      if (!validationResult.valid) {
-        // Set validation error to display below query
-        setValidationError({
-          type: validationResult.error_type,
-          message: formatErrorMessage(validationResult.error),
-          typeDisplay: getErrorTypeDisplay(validationResult.error_type)
-        });
-        
-        setLoading(false);
-        setAnalysisStatus('error');
-        return;
-      }
-      
-      // Clear validation error if query is valid
-      setValidationError(null);
-      
-      // Check for cost warnings (optional)
-      if (validationResult.validation_details && validationResult.validation_details.estimated_cost > 100) {
-        const shouldContinue = window.confirm(
-          `This query may cost approximately $${validationResult.validation_details.estimated_cost.toFixed(2)} to run.\n\nDo you want to continue?`
-        );
-        
-        if (!shouldContinue) {
-          setLoading(false);
-          return;
-        }
-      }
-      
-      // Now show progress after successful validation
-      setShowProgress(true);
-      
-      // Store validation details for display
-      setStageData(prev => ({
-        ...prev,
-        validation: validationResult.validation_details
-      }));
-      
-    } catch (validationError) {
-      console.error('Validation error:', validationError);
-      toast.error('Failed to validate query. Proceeding with optimization anyway.', { duration: 3000 });
-    }
+    // Skip dry run validation - the agent workflow will handle validation
     
     setAnalysisStatus('analyzing');
     
